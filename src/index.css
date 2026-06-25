@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+body {
+  font-family: 'Fredoka', 'Noto Sans TC', sans-serif;
+  background-color: #0b0f19; /* 深空暗黑主題 */
+  color: #f1f5f9;
+}
+
+#map {
+  height: 420px;
+  border-radius: 1.5rem;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+  z-index: 10;
+}
+
+/* 三色動態脈衝光圈 */
+.pulse-cyan {
+  background: #22d3ee; /* 飄帶藍色 */
+  border-radius: 50%;
+  box-shadow: 0 0 0 0 rgba(34, 211, 238, 0.8);
+  animation: pulse-c 1.5s infinite;
+}
+@keyframes pulse-c {
+  0% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(34, 211, 238, 0.8); }
+  70% { transform: scale(1.05); box-shadow: 0 0 0 12px rgba(34, 211, 238, 0); }
+  100% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(34, 211, 238, 0); }
+}
+
+.pulse-pink {
+  background: #ec4899; /* 開花粉色 */
+  border-radius: 50%;
+  box-shadow: 0 0 0 0 rgba(236, 72, 153, 0.8);
+  animation: pulse-p 1.5s infinite;
+}
+@keyframes pulse-p {
+  0% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(236, 72, 153, 0.8); }
+  70% { transform: scale(1.05); box-shadow: 0 0 0 12px rgba(236, 72, 153, 0); }
+  100% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(236, 72, 153, 0); }
+}
+
+.pulse-amber {
+  background: #f59e0b; /* 快枯萎橘黃色 */
+  border-radius: 50%;
+  box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.8);
+  animation: pulse-a 1.2s infinite;
+}
+@keyframes pulse-a {
+  0% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.8); }
+  70% { transform: scale(1.1); box-shadow: 0 0 0 12px rgba(245, 158, 11, 0); }
+  100% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+}
+
+/* 自訂滾動條 */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #111827; }
+::-webkit-scrollbar-thumb { background: #374151; border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: #4b5563; }

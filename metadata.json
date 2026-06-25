@@ -1,0 +1,6 @@
+{
+  "name": "花嶼雞籠 測試版",
+  "description": "基隆東岸特攻大花監控雷達與種花時間建議系統",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
