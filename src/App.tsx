@@ -788,9 +788,9 @@ export default function App() {
       const earliestClusterEnd = earliestClusterStartTime + 15 * 60 * 1000;
       const clusterCount = bloomingFlowers.filter(f => f.expireTime >= earliestClusterStartTime! && f.expireTime <= earliestClusterEnd).length;
       
-      recommendedPlantingTime = `${timeStr} (${clusterCount}朵 15m叢集)`;
+      recommendedPlantingTime = `${timeStr} (${clusterCount}朵 👑精選)`;
     } else {
-      recommendedPlantingTime = "無符合之叢集";
+      recommendedPlantingTime = "無符合之精選";
     }
   } else {
     // Standard recommended time: earliest blooming flower expiring
@@ -805,6 +805,103 @@ export default function App() {
 
   const handleClusterCheckboxChange = (checked: boolean) => {
     setStatusFilter(checked ? "cluster" : "all");
+  };
+
+  const handleExportSelectedRoute = () => {
+    // 1. Get all active cluster/featured points
+    const activeClusterPoints = processedPoints.filter(p => p.region === activeRegion && p.isBlooming && p.isClusterMember);
+    
+    if (activeClusterPoints.length === 0) {
+      showToast("⚠️ 目前無精選點位（最少5花點內之點位）！");
+      playErrorBuzz();
+      return;
+    }
+
+    // 2. Nearest Neighbor heuristic for the Traveling Salesperson Problem (TSP)
+    const solveTSP = (points: typeof activeClusterPoints, startLat?: number, startLng?: number) => {
+      const remaining = [...points];
+      const path: typeof activeClusterPoints = [];
+      
+      let currLat = startLat !== undefined ? startLat : points[0].lat;
+      let currLng = startLng !== undefined ? startLng : points[0].lng;
+      
+      if (startLat === undefined && startLng === undefined) {
+        path.push(remaining[0]);
+        remaining.splice(0, 1);
+      }
+      
+      while (remaining.length > 0) {
+        let bestIndex = 0;
+        let bestDist = Infinity;
+        
+        for (let i = 0; i < remaining.length; i++) {
+          const dy = remaining[i].lat - currLat;
+          const dx = remaining[i].lng - currLng;
+          const dist = dy * dy + dx * dx;
+          if (dist < bestDist) {
+            bestDist = dist;
+            bestIndex = i;
+          }
+        }
+        
+        const nextPt = remaining[bestIndex];
+        path.push(nextPt);
+        currLat = nextPt.lat;
+        currLng = nextPt.lng;
+        remaining.splice(bestIndex, 1);
+      }
+      
+      return path;
+    };
+
+    const buildGoogleMapsUrl = (path: typeof activeClusterPoints) => {
+      if (path.length === 0) return "";
+      
+      const origin = `${path[0].lat},${path[0].lng}`;
+      const destination = `${path[path.length - 1].lat},${path[path.length - 1].lng}`;
+      
+      let waypoints = "";
+      if (path.length > 2) {
+        const intermediate = path.slice(1, path.length - 1);
+        waypoints = intermediate.map(p => `${p.lat},${p.lng}`).join("|");
+      }
+      
+      let url = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}`;
+      if (waypoints) {
+        url += `&waypoints=${encodeURIComponent(waypoints)}`;
+      }
+      url += `&travelmode=driving`;
+      return url;
+    };
+
+    showToast("👑 正在以最短路徑規劃導航路線...");
+    playSynthChime();
+
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const userLat = pos.coords.latitude;
+          const userLng = pos.coords.longitude;
+          const path = solveTSP(activeClusterPoints, userLat, userLng);
+          const url = buildGoogleMapsUrl(path);
+          window.open(url, "_blank");
+          showToast("🚗 導航規劃成功！已包含您的起點");
+        },
+        (err) => {
+          console.warn("Geolocation failed or denied, using first landmark as start", err);
+          const path = solveTSP(activeClusterPoints);
+          const url = buildGoogleMapsUrl(path);
+          window.open(url, "_blank");
+          showToast("🚗 導航規劃成功！自首站出發");
+        },
+        { timeout: 3500, enableHighAccuracy: true }
+      );
+    } else {
+      const path = solveTSP(activeClusterPoints);
+      const url = buildGoogleMapsUrl(path);
+      window.open(url, "_blank");
+      showToast("🚗 導航規劃成功！自首站出發");
+    }
   };
 
   // Full dataset with status tags
@@ -918,7 +1015,7 @@ export default function App() {
         }
 
         // Highlight cluster on the map visually
-        const clusterIndicator = item.isClusterMember ? 'border-indigo-400 border-dashed' : 'border-white';
+        const clusterIndicator = item.isClusterMember ? 'border-amber-400 border-solid scale-110 shadow-lg shadow-amber-500/50' : 'border-white';
 
         markerHtml = `
           <div class="flex flex-col items-center justify-center">
@@ -926,7 +1023,7 @@ export default function App() {
               ${emoji}
             </div>
             <div class="bg-slate-950/90 text-white font-extrabold text-[9px] px-1.5 py-0.5 rounded-full shadow-lg mt-1 border border-pink-400 whitespace-nowrap">
-              #${item.id} ${item.name} ${item.isClusterMember ? '🔮' : ''}
+              #${item.id} ${item.name} ${item.isClusterMember ? '👑' : ''}
             </div>
           </div>
         `;
@@ -966,7 +1063,7 @@ export default function App() {
           tooltipContent += `<span class="text-pink-600 font-bold">🌸 正常開花中</span><br>`;
         }
         if (item.isClusterMember) {
-          tooltipContent += `<span class="text-purple-600 font-black">🔮 15m 密集開花叢集</span><br>`;
+          tooltipContent += `<span class="text-amber-600 font-black">👑 15m 精選點</span><br>`;
         }
         tooltipContent += `剩餘時間: ${h}h ${m}m ${s}s<br>枯萎時間: ${formatDateLabel(item.expire)}</div>`;
       } else {
@@ -1383,6 +1480,13 @@ export default function App() {
                 />
                 <span>最少5花點</span>
               </label>
+              <div className="h-4 w-px bg-slate-800" />
+              <button
+                onClick={handleExportSelectedRoute}
+                className="bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 text-slate-950 font-black px-3 py-1 rounded-xl transition active:scale-95 flex items-center gap-1 text-[11px] shadow-lg shadow-amber-500/10"
+              >
+                👑 導航精選路線
+              </button>
             </div>
           </div>
           
@@ -1585,7 +1689,7 @@ export default function App() {
                   <option value="dying_only">⚠️ 僅顯示快枯歸葉</option>
                   <option value="leaf">🍃 僅顯示葉子</option>
                   {/* Option Requirement 3: 15m Cluster */}
-                  <option value="cluster">僅顯示叢集 (15分鐘內≥5朵) 🔮</option>
+                  <option value="cluster">👑 僅顯示精選 (最少5花點)</option>
                 </select>
                 
                 <select 
@@ -1695,8 +1799,8 @@ export default function App() {
                             <div className="font-bold text-slate-200 hover:text-pink-400 transition flex items-center gap-1.5">
                               {item.name}
                               {item.isClusterMember && item.isBlooming && (
-                                <span className="text-[10px] bg-purple-500/20 border border-purple-500/30 text-purple-300 font-extrabold px-1.5 py-0.5 rounded" title="屬於 15 分鐘內超過 5 朵的密集叢集">
-                                  🔮 叢集
+                                <span className="text-[10px] bg-amber-500/20 border border-amber-500/30 text-amber-300 font-extrabold px-1.5 py-0.5 rounded flex items-center gap-0.5" title="屬於 15 分鐘內超過 5 朵的密集開花精選">
+                                  👑 精選
                                 </span>
                               )}
                             </div>
