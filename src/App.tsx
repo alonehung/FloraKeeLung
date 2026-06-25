@@ -47,6 +47,16 @@ const PRESETS: Record<string, Landmark[]> = {
   ]
 };
 
+const extractSheetId = (input: string): string => {
+  if (!input) return "";
+  const trimmed = input.trim();
+  const match = trimmed.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  if (match && match[1]) {
+    return match[1];
+  }
+  return trimmed;
+};
+
 const fetchSheetViaJSONP = (sheetId: string): Promise<Landmark[]> => {
   return new Promise((resolve, reject) => {
     const callbackName = `gviz_callback_${Math.round(Math.random() * 1000000)}`;
@@ -77,7 +87,15 @@ const fetchSheetViaJSONP = (sheetId: string): Promise<Landmark[]> => {
         const loadedLandmarks: Landmark[] = [];
         const rows = data.table.rows;
         
-        for (let i = 1; i < rows.length; i++) {
+        let startIndex = 0;
+        if (rows.length > 0 && rows[0] && rows[0].c && rows[0].c[0]) {
+          const firstCellVal = String(rows[0].c[0].v || "").trim();
+          if (firstCellVal !== "" && isNaN(Number(firstCellVal))) {
+            startIndex = 1;
+          }
+        }
+        
+        for (let i = startIndex; i < rows.length; i++) {
           const row = rows[i];
           if (!row || !row.c) continue;
           
@@ -189,7 +207,8 @@ export default function App() {
   useEffect(() => {
     // 1. Configs
     const savedClientId = localStorage.getItem(GOOGLE_CLIENT_ID_KEY) || DEFAULT_CLIENT_ID;
-    const savedSheetId = localStorage.getItem(GOOGLE_SHEET_ID_KEY) || DEFAULT_SHEET_ID;
+    const rawSheetId = localStorage.getItem(GOOGLE_SHEET_ID_KEY) || DEFAULT_SHEET_ID;
+    const savedSheetId = extractSheetId(rawSheetId);
     const savedManualToken = localStorage.getItem(MANUAL_TOKEN_KEY) || "";
 
     setConfigClientId(savedClientId);
@@ -502,9 +521,17 @@ export default function App() {
             const csvText = await response.text();
             const rows = parseCSV(csvText);
 
-            if (rows && rows.length > 1) {
+            if (rows && rows.length > 0) {
+              let startIndex = 0;
+              if (rows[0] && rows[0][0]) {
+                const firstCellVal = String(rows[0][0]).trim();
+                if (firstCellVal !== "" && isNaN(Number(firstCellVal))) {
+                  startIndex = 1;
+                }
+              }
+
               const loadedLandmarks: Landmark[] = [];
-              for (let i = 1; i < rows.length; i++) {
+              for (let i = startIndex; i < rows.length; i++) {
                 const row = rows[i];
                 if (!row || row.length < 4 || !row[0]) continue;
                 const lat = parseFloat(row[2]);
@@ -520,12 +547,14 @@ export default function App() {
                   region: row[5] ? row[5].trim() : "keelung"
                 });
               }
-              setLandmarks(loadedLandmarks);
-              localStorage.setItem(`${LOCAL_STORAGE_KEY_PREFIX}_master_list`, JSON.stringify(loadedLandmarks));
-              centerMapOnLandmarks(loadedLandmarks);
-              showToast("📥 免登入唯讀載入完成！");
-              playSynthChime();
-              return;
+              if (loadedLandmarks.length > 0) {
+                setLandmarks(loadedLandmarks);
+                localStorage.setItem(`${LOCAL_STORAGE_KEY_PREFIX}_master_list`, JSON.stringify(loadedLandmarks));
+                centerMapOnLandmarks(loadedLandmarks);
+                showToast("📥 免登入唯讀載入完成！");
+                playSynthChime();
+                return;
+              }
             }
           }
         } catch (csvErr) {
@@ -561,7 +590,7 @@ export default function App() {
         const data = await response.json();
         const rows = data.values;
         
-        if (!rows || rows.length <= 1) {
+        if (!rows || rows.length === 0) {
           if (accessToken) {
             showToast("🌱 雲端為空！正在自動初始化預設大花點位...");
             await initializeSpreadsheetDefault(accessToken, sheetId, targetSheetName);
@@ -571,8 +600,16 @@ export default function App() {
           return;
         }
 
+        let startIndex = 0;
+        if (rows[0] && rows[0][0]) {
+          const firstCellVal = String(rows[0][0]).trim();
+          if (firstCellVal !== "" && isNaN(Number(firstCellVal))) {
+            startIndex = 1;
+          }
+        }
+
         const loadedLandmarks: Landmark[] = [];
-        for (let i = 1; i < rows.length; i++) {
+        for (let i = startIndex; i < rows.length; i++) {
           const row = rows[i];
           if (!row || row.length < 4 || !row[0]) continue;
           const lat = parseFloat(row[2]);
@@ -595,11 +632,11 @@ export default function App() {
         showToast("📥 雲端資料同步完成！");
         playSynthChime();
       } else {
-        showToast("❌ 無法讀取試算表。請確認雲端設定");
+        showToast("⚠️ 雲端讀取失敗。請確認：1.已設為「任何人皆可檢視」 2.試算表 ID 正確");
         playErrorBuzz();
       }
     } catch (e) {
-      showToast("❌ 連線至 Google API 失敗，將使用本地快照");
+      showToast("⚠️ 連線至 Google API 失敗，請確認網路與權限並重試");
       playErrorBuzz();
     }
   };
@@ -1161,23 +1198,25 @@ export default function App() {
   };
 
   const saveConfigurations = async () => {
+    const cleanSheetId = extractSheetId(configSheetId);
+    setConfigSheetId(cleanSheetId);
     localStorage.setItem(GOOGLE_CLIENT_ID_KEY, configClientId);
-    localStorage.setItem(GOOGLE_SHEET_ID_KEY, configSheetId);
+    localStorage.setItem(GOOGLE_SHEET_ID_KEY, cleanSheetId);
     
     if (configManualToken.trim()) {
       localStorage.setItem(MANUAL_TOKEN_KEY, configManualToken.trim());
       setGoogleAccessToken(configManualToken.trim());
-      await handleSuccessfulLogin(configManualToken.trim(), configSheetId);
+      await handleSuccessfulLogin(configManualToken.trim(), cleanSheetId);
     } else {
       localStorage.removeItem(MANUAL_TOKEN_KEY);
       setGoogleAccessToken(null);
       setGoogleUserEmail(null);
       setHasEditPermission(false);
-      await pullDataFromSheets(null, configSheetId);
+      await pullDataFromSheets(null, cleanSheetId);
     }
 
     setShowConfigModal(false);
-    showToast("⚙️ 雲端設定已儲存！");
+    showToast("⚙️ 雲端設定已儲存並同步！");
   };
 
   const parseAndLoadGPX = async () => {
@@ -1735,8 +1774,13 @@ export default function App() {
                   type="text" 
                   value={configSheetId} 
                   onChange={(e) => setConfigSheetId(e.target.value)}
+                  placeholder="例如: 1BmWfet3J7LaCrJZfNe8RN58LCI990o_9NySRRCc0BpU"
                   className="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500"
                 />
+                <p className="mt-1.5 text-[10px] text-slate-400 leading-relaxed bg-slate-950/40 p-2 rounded-lg border border-slate-800/60">
+                  💡 <strong>貼心提示：</strong> 支援貼上<strong>整行 Google 試算表瀏覽器網址</strong>或<strong>純 ID</strong>！
+                  請確保該試算表的共用權限設為：<strong className="text-pink-400">「知道連結的任何人皆可檢視」</strong>，即可享受免登入自動同步功能。
+                </p>
               </div>
               <div className="p-3 bg-indigo-950/30 border border-indigo-500/20 rounded-xl space-y-1.5">
                 <span className="font-bold text-indigo-300 block"><i className="fa-solid fa-shield-halved"></i> 預覽與開發調試 Fallback:</span>
