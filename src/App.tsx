@@ -47,6 +47,84 @@ const PRESETS: Record<string, Landmark[]> = {
   ]
 };
 
+const fetchSheetViaJSONP = (sheetId: string): Promise<Landmark[]> => {
+  return new Promise((resolve, reject) => {
+    const callbackName = `gviz_callback_${Math.round(Math.random() * 1000000)}`;
+    const script = document.createElement("script");
+    
+    const cleanup = () => {
+      delete (window as any)[callbackName];
+      if (script.parentNode) {
+        script.parentNode.removeChild(script);
+      }
+    };
+
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error("Timeout loading Google Sheet via JSONP"));
+    }, 8000);
+
+    (window as any)[callbackName] = (data: any) => {
+      clearTimeout(timeout);
+      cleanup();
+      
+      try {
+        if (!data || !data.table || !data.table.rows) {
+          reject(new Error("Invalid JSONP response structure"));
+          return;
+        }
+
+        const loadedLandmarks: Landmark[] = [];
+        const rows = data.table.rows;
+        
+        for (let i = 1; i < rows.length; i++) {
+          const row = rows[i];
+          if (!row || !row.c) continue;
+          
+          const idVal = row.c[0]?.v;
+          const nameVal = row.c[1]?.v;
+          const latVal = row.c[2]?.v;
+          const lngVal = row.c[3]?.v;
+          const expireVal = row.c[4]?.v;
+          const regionVal = row.c[5]?.v;
+
+          if (idVal === undefined || idVal === null) continue;
+          
+          const id = typeof idVal === "number" ? idVal : parseInt(String(idVal).trim(), 10);
+          const name = nameVal !== undefined && nameVal !== null ? String(nameVal).trim() : `大花 ${id}`;
+          const lat = typeof latVal === "number" ? latVal : parseFloat(String(latVal));
+          const lng = typeof lngVal === "number" ? lngVal : parseFloat(String(lngVal));
+          const expire = expireVal !== undefined && expireVal !== null ? String(expireVal).trim() : null;
+          const region = regionVal !== undefined && regionVal !== null ? String(regionVal).trim() : "keelung";
+
+          if (isNaN(id) || isNaN(lat) || isNaN(lng)) continue;
+
+          loadedLandmarks.push({
+            id,
+            name,
+            lat,
+            lng,
+            expire: (expire === "null" || expire === "") ? null : expire,
+            region
+          });
+        }
+        
+        resolve(loadedLandmarks);
+      } catch (err) {
+        reject(err);
+      }
+    };
+
+    script.src = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=responseHandler:${callbackName}`;
+    script.onerror = (err) => {
+      clearTimeout(timeout);
+      cleanup();
+      reject(err);
+    };
+    document.body.appendChild(script);
+  });
+};
+
 export default function App() {
   const [landmarks, setLandmarks] = useState<Landmark[]>([]);
   const [activeRegion] = useState("keelung");
@@ -403,43 +481,56 @@ export default function App() {
 
     showToast("🔄 正在載入雲端試算表...");
 
-    // Try reading via public CSV format (No auth required) if no accessToken
+    // Try reading via public JSONP format (No auth required, bypasses CORS perfectly) if no accessToken
     if (!accessToken) {
       try {
-        const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
-        const response = await fetch(csvUrl);
-        if (response.ok) {
-          const csvText = await response.text();
-          const rows = parseCSV(csvText);
-
-          if (rows && rows.length > 1) {
-            const loadedLandmarks: Landmark[] = [];
-            for (let i = 1; i < rows.length; i++) {
-              const row = rows[i];
-              if (!row || row.length < 4 || !row[0]) continue;
-              const lat = parseFloat(row[2]);
-              const lng = parseFloat(row[3]);
-              if (isNaN(lat) || isNaN(lng)) continue;
-
-              loadedLandmarks.push({
-                id: parseInt(row[0].trim(), 10),
-                name: row[1] ? row[1].trim() : `大花 ${row[0]}`,
-                lat: lat,
-                lng: lng,
-                expire: row[4] && row[4].trim() !== "null" && row[4].trim() !== "" ? row[4].trim() : null,
-                region: row[5] ? row[5].trim() : "keelung"
-              });
-            }
-            setLandmarks(loadedLandmarks);
-            localStorage.setItem(`${LOCAL_STORAGE_KEY_PREFIX}_master_list`, JSON.stringify(loadedLandmarks));
-            centerMapOnLandmarks(loadedLandmarks);
-            showToast("📥 免登入唯讀載入完成！");
-            playSynthChime();
-            return;
-          }
+        const loadedLandmarks = await fetchSheetViaJSONP(sheetId);
+        if (loadedLandmarks && loadedLandmarks.length > 0) {
+          setLandmarks(loadedLandmarks);
+          localStorage.setItem(`${LOCAL_STORAGE_KEY_PREFIX}_master_list`, JSON.stringify(loadedLandmarks));
+          centerMapOnLandmarks(loadedLandmarks);
+          showToast("📥 免登入唯讀載入完成！");
+          playSynthChime();
+          return;
         }
       } catch (e) {
-        console.error("Public CSV read failed, falling back to REST API", e);
+        console.error("Public JSONP read failed, trying CSV export fallback", e);
+        try {
+          const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
+          const response = await fetch(csvUrl);
+          if (response.ok) {
+            const csvText = await response.text();
+            const rows = parseCSV(csvText);
+
+            if (rows && rows.length > 1) {
+              const loadedLandmarks: Landmark[] = [];
+              for (let i = 1; i < rows.length; i++) {
+                const row = rows[i];
+                if (!row || row.length < 4 || !row[0]) continue;
+                const lat = parseFloat(row[2]);
+                const lng = parseFloat(row[3]);
+                if (isNaN(lat) || isNaN(lng)) continue;
+
+                loadedLandmarks.push({
+                  id: parseInt(row[0].trim(), 10),
+                  name: row[1] ? row[1].trim() : `大花 ${row[0]}`,
+                  lat: lat,
+                  lng: lng,
+                  expire: row[4] && row[4].trim() !== "null" && row[4].trim() !== "" ? row[4].trim() : null,
+                  region: row[5] ? row[5].trim() : "keelung"
+                });
+              }
+              setLandmarks(loadedLandmarks);
+              localStorage.setItem(`${LOCAL_STORAGE_KEY_PREFIX}_master_list`, JSON.stringify(loadedLandmarks));
+              centerMapOnLandmarks(loadedLandmarks);
+              showToast("📥 免登入唯讀載入完成！");
+              playSynthChime();
+              return;
+            }
+          }
+        } catch (csvErr) {
+          console.error("Public CSV read failed, falling back to REST API", csvErr);
+        }
       }
     }
 
