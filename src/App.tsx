@@ -143,6 +143,14 @@ export default function App() {
       L.control.zoom({ position: 'bottomright' }).addTo(mapObj);
       mapRef.current = mapObj;
       isMapInitialized.current = true;
+
+      // Auto-center map on initial landmarks
+      const regionLandmarks = initialLandmarks.filter(l => l.region === "keelung");
+      if (regionLandmarks.length > 0) {
+        const avgLat = regionLandmarks.reduce((acc, cur) => acc + cur.lat, 0) / regionLandmarks.length;
+        const avgLng = regionLandmarks.reduce((acc, cur) => acc + cur.lng, 0) / regionLandmarks.length;
+        mapObj.setView([avgLat, avgLng], 14);
+      }
     }
 
     // 4. Try authenticating with saved manual token or pull sheets
@@ -375,6 +383,17 @@ export default function App() {
     }
   };
 
+  // Helper to center the map on the loaded landmarks' center of gravity
+  const centerMapOnLandmarks = (loadedLandmarks: Landmark[]) => {
+    if (!mapRef.current) return;
+    const regionLandmarks = loadedLandmarks.filter(l => l.region === activeRegion);
+    if (regionLandmarks.length > 0) {
+      const avgLat = regionLandmarks.reduce((acc, cur) => acc + cur.lat, 0) / regionLandmarks.length;
+      const avgLng = regionLandmarks.reduce((acc, cur) => acc + cur.lng, 0) / regionLandmarks.length;
+      mapRef.current.setView([avgLat, avgLng], 14);
+    }
+  };
+
   // Pull spreadsheet data
   const pullDataFromSheets = async (accessToken: string | null, sheetId: string) => {
     if (!sheetId) {
@@ -398,17 +417,22 @@ export default function App() {
             for (let i = 1; i < rows.length; i++) {
               const row = rows[i];
               if (!row || row.length < 4 || !row[0]) continue;
+              const lat = parseFloat(row[2]);
+              const lng = parseFloat(row[3]);
+              if (isNaN(lat) || isNaN(lng)) continue;
+
               loadedLandmarks.push({
                 id: parseInt(row[0].trim(), 10),
                 name: row[1] ? row[1].trim() : `大花 ${row[0]}`,
-                lat: parseFloat(row[2]),
-                lng: parseFloat(row[3]),
+                lat: lat,
+                lng: lng,
                 expire: row[4] && row[4].trim() !== "null" && row[4].trim() !== "" ? row[4].trim() : null,
                 region: row[5] ? row[5].trim() : "keelung"
               });
             }
             setLandmarks(loadedLandmarks);
             localStorage.setItem(`${LOCAL_STORAGE_KEY_PREFIX}_master_list`, JSON.stringify(loadedLandmarks));
+            centerMapOnLandmarks(loadedLandmarks);
             showToast("📥 免登入唯讀載入完成！");
             playSynthChime();
             return;
@@ -459,12 +483,16 @@ export default function App() {
         const loadedLandmarks: Landmark[] = [];
         for (let i = 1; i < rows.length; i++) {
           const row = rows[i];
-          if (!row[0]) continue;
+          if (!row || row.length < 4 || !row[0]) continue;
+          const lat = parseFloat(row[2]);
+          const lng = parseFloat(row[3]);
+          if (isNaN(lat) || isNaN(lng)) continue;
+
           loadedLandmarks.push({
             id: parseInt(row[0], 10),
             name: row[1] || `大花 ${row[0]}`,
-            lat: parseFloat(row[2]),
-            lng: parseFloat(row[3]),
+            lat: lat,
+            lng: lng,
             expire: row[4] && row[4] !== "null" ? row[4] : null,
             region: row[5] || "keelung"
           });
@@ -472,6 +500,7 @@ export default function App() {
 
         setLandmarks(loadedLandmarks);
         localStorage.setItem(`${LOCAL_STORAGE_KEY_PREFIX}_master_list`, JSON.stringify(loadedLandmarks));
+        centerMapOnLandmarks(loadedLandmarks);
         showToast("📥 雲端資料同步完成！");
         playSynthChime();
       } else {
