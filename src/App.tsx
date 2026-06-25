@@ -1381,7 +1381,7 @@ export default function App() {
                   onChange={(e) => handleClusterCheckboxChange(e.target.checked)}
                   className="accent-pink-500 w-4 h-4 rounded border-slate-700 focus:ring-pink-500"
                 />
-                <span>15m 叢集</span>
+                <span>最少5花點</span>
               </label>
             </div>
           </div>
@@ -1427,7 +1427,7 @@ export default function App() {
           {/* Battle Info Card */}
           <div className="bg-slate-900/60 rounded-3xl p-5 border border-slate-800 flex flex-col gap-3 backdrop-blur-md">
             <h2 className="font-bold text-xs text-slate-400 uppercase tracking-widest flex items-center justify-between">
-              <span>🗺️ 戰區部署資訊</span>
+              <span>🗺️ 花田選擇</span>
               <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${hasEditPermission ? "text-emerald-400 bg-emerald-500/10 border border-emerald-500/20" : "text-indigo-400 bg-indigo-500/10 border border-indigo-500/20"}`}>
                 {hasEditPermission ? "☁️ 雲端同步編輯權限" : "👁️ 雲端免登入唯讀"}
               </span>
@@ -1454,7 +1454,7 @@ export default function App() {
             <div className="flex items-center justify-between">
               <h2 className="font-bold text-base text-slate-100 flex items-center gap-2">
                 <i className="fa-solid fa-terminal text-pink-500"></i>
-                神速特攻指令台
+                CLI Prompt
               </h2>
               <button onClick={toggleSound} className="text-pink-400 hover:text-pink-300 bg-pink-500/10 border border-pink-500/20 px-2.5 py-1 rounded-full text-[11px] font-semibold flex items-center gap-1.5 transition">
                 <i className={`fa-solid ${soundEnabled ? 'fa-volume-high' : 'fa-volume-xmark'}`}></i>
@@ -1516,7 +1516,7 @@ export default function App() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="bg-slate-900/60 rounded-2xl p-4 border border-slate-800 flex items-center justify-between backdrop-blur-md">
               <div>
-                <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">🌸 戰域狂咲中</p>
+                <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">🌸 開花中</p>
                 <h3 id="stat-blooming-count" className="text-3xl font-black text-pink-500 mt-1">
                   {totalBloomCount} <span className="text-xs font-normal text-slate-400">朵</span>
                 </h3>
@@ -1671,7 +1671,6 @@ export default function App() {
                               <div className="w-24 bg-slate-800 rounded-full h-1 overflow-hidden">
                                 <div className="bg-gradient-to-r from-pink-500 to-purple-500 h-1 rounded-full" style={{ width: `${100 - progressPercent}%` }}></div>
                               </div>
-                              <div className="text-[9px] text-slate-500">於 {formatDateTimeShort(item.expire)} 枯萎</div>
                             </div>
                           );
                         }
@@ -1683,10 +1682,6 @@ export default function App() {
                         );
                         countdownLabel = <span className="text-slate-600 text-[11px]">已歸地</span>;
                       }
-
-                      const actionBtnClass = hasEditPermission ? 
-                        "bg-pink-500/10 hover:bg-pink-500/20 text-pink-400 border border-pink-500/30 text-[10px] font-black px-2 py-0.5 rounded transition active:scale-95" :
-                        "bg-slate-800 text-slate-600 border border-slate-700/20 text-[10px] font-bold px-2 py-0.5 rounded cursor-not-allowed";
 
                       return (
                         <tr key={item.id} id={`row-${item.id}`} className="hover:bg-slate-900/50 transition border-b border-slate-800/40 align-middle">
@@ -1712,13 +1707,12 @@ export default function App() {
                           <td className="py-3 px-4">{statusBadge}</td>
                           <td className="py-3 px-4">{countdownLabel}</td>
                           <td className="py-3 px-4 text-right pr-6">
-                            <div className="flex justify-end items-center gap-2">
-                              <button 
-                                onClick={() => quickUpdateDuration(item.id, 2, 24)}
-                                className={actionBtnClass}
-                              >
-                                +2h24m
-                              </button>
+                            <div className="flex justify-end items-center gap-3">
+                              {item.isBlooming && item.expire && (
+                                <span className="text-[11px] text-slate-400 font-medium">
+                                  於 {formatDateTimeShort(item.expire)} 枯萎
+                                </span>
+                              )}
                               <button 
                                 onClick={() => triggerEditModal(item.id)}
                                 className="text-slate-500 hover:text-slate-300 p-1.5 rounded transition"
