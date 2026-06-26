@@ -272,6 +272,15 @@ export default function App() {
     };
   }, []);
 
+  // Recalculate Leaflet map layout sizes when layout toggles between Simple and Editor
+  useEffect(() => {
+    if (mapRef.current) {
+      setTimeout(() => {
+        mapRef.current.invalidateSize();
+      }, 150);
+    }
+  }, [hasEditPermission]);
+
   // Synths ToneJS Setup
   const initSynth = () => {
     try {
@@ -957,21 +966,22 @@ export default function App() {
 
   // Sorting
   const sortedPoints = [...filteredPoints].sort((a, b) => {
-    if (sortSelector === 'id_asc') {
+    const activeSort = hasEditPermission ? sortSelector : 'time_asc';
+    if (activeSort === 'id_asc') {
       return a.id - b.id;
-    } else if (sortSelector === 'id_desc') {
+    } else if (activeSort === 'id_desc') {
       return b.id - a.id;
-    } else if (sortSelector === 'time_asc') {
+    } else if (activeSort === 'time_asc') {
       if (!a.isBlooming && b.isBlooming) return 1;
       if (a.isBlooming && !b.isBlooming) return -1;
       if (!a.isBlooming && !b.isBlooming) return a.id - b.id;
       return a.remainingSecs - b.remainingSecs;
-    } else if (sortSelector === 'time_desc') {
+    } else if (activeSort === 'time_desc') {
       if (!a.isBlooming && b.isBlooming) return 1;
       if (a.isBlooming && !b.isBlooming) return -1;
       if (!a.isBlooming && !b.isBlooming) return a.id - b.id;
       return b.remainingSecs - a.remainingSecs;
-    } else if (sortSelector === 'name_asc') {
+    } else if (activeSort === 'name_asc') {
       return a.name.localeCompare(b.name, 'zh-Hant');
     }
     return 0;
@@ -1448,49 +1458,67 @@ export default function App() {
         </div>
         
         <div className="max-w-7xl mx-auto flex flex-col lg:flex-row items-center justify-between gap-4 relative z-10">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
-            <div className="flex items-center gap-3">
-              <div className="bg-pink-500/10 p-2.5 rounded-2xl border border-pink-500/30">
-                <span className="text-3xl">🌸</span>
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full lg:w-auto">
+            <div className="flex items-center justify-between w-full lg:w-auto gap-3">
+              <div className="flex items-center gap-3">
+                <div className="bg-pink-500/10 p-2 sm:p-2.5 rounded-2xl border border-pink-500/30">
+                  <span className="text-2xl sm:text-3xl">🌸</span>
+                </div>
+                <div>
+                  <h1 className="text-xl sm:text-2xl font-black tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-pink-400 via-purple-400 to-indigo-400 flex items-center gap-2">
+                    花嶼雞籠 
+                    <span className="text-[10px] bg-red-500 text-white font-extrabold px-1.5 py-0.5 rounded-full tracking-normal">測試版</span>
+                  </h1>
+                  <p className="text-purple-300 text-[10px] sm:text-xs tracking-wider">基隆東岸特攻雷達與智慧種植系統</p>
+                </div>
               </div>
-              <div>
-                <h1 className="text-2xl font-black tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-pink-400 via-purple-400 to-indigo-400 flex items-center gap-2">
-                  花嶼雞籠 
-                  <span className="text-[10px] bg-red-500 text-white font-extrabold px-2 py-0.5 rounded-full tracking-normal">測試版</span>
-                </h1>
-                <p className="text-purple-300 text-xs tracking-wider">基隆東岸特攻雷達與智慧種植系統</p>
+
+              {/* Mobile quick actions for non-logged-in or standard viewers */}
+              <div className="flex lg:hidden items-center gap-2">
+                <div id="google-widget-mobile">
+                  {googleUserEmail ? (
+                    <button onClick={performGoogleLogout} className="text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 px-2.5 py-1.5 rounded-xl text-xs font-bold transition">登出</button>
+                  ) : (
+                    <button onClick={startGoogleLogin} className="bg-gradient-to-r from-pink-500 to-purple-600 text-white font-extrabold px-3 py-1.5 rounded-xl text-xs transition shadow flex items-center gap-1.5">
+                      <i className="fa-brands fa-google"></i> 登入
+                    </button>
+                  )}
+                </div>
+                <button onClick={() => setShowConfigModal(true)} className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 p-2 rounded-xl transition" title="雲端設定">
+                  <i className="fa-solid fa-sliders text-xs"></i>
+                </button>
               </div>
             </div>
 
-            {/* Replacement: Planting Recommendation & 15m Cluster Checkbox */}
-            <div className="flex flex-wrap items-center gap-3 bg-slate-950/70 p-2.5 rounded-2xl border border-purple-500/30 text-xs shadow-inner">
+            {/* Planting recommendation & settings bar */}
+            <div className="flex flex-wrap items-center gap-2 bg-slate-950/70 p-2 rounded-2xl border border-purple-500/30 text-[11px] sm:text-xs shadow-inner w-full sm:w-auto">
               <div className="flex items-center gap-1.5 text-pink-400 font-bold">
-                <span className="flex items-center gap-1"><i className="fa-solid fa-seedling text-emerald-400"></i> 建議種花時間：</span>
-                <span className="text-white font-black text-sm bg-purple-950 px-2.5 py-0.5 rounded-xl border border-purple-500/30">
+                <span className="flex items-center gap-1"><i className="fa-solid fa-seedling text-emerald-400"></i> 建議：</span>
+                <span className="text-white font-black bg-purple-950 px-2 py-0.5 rounded-lg border border-purple-500/30">
                   {recommendedPlantingTime}
                 </span>
               </div>
               <div className="h-4 w-px bg-slate-800" />
-              <label className="flex items-center gap-1.5 cursor-pointer text-slate-300 select-none font-bold hover:text-pink-400 transition">
+              <label className="flex items-center gap-1 cursor-pointer text-slate-300 select-none font-bold hover:text-pink-400 transition">
                 <input 
                   type="checkbox" 
                   checked={isClusterCheckbox} 
                   onChange={(e) => handleClusterCheckboxChange(e.target.checked)}
-                  className="accent-pink-500 w-4 h-4 rounded border-slate-700 focus:ring-pink-500"
+                  className="accent-pink-500 w-3.5 h-3.5 rounded border-slate-700 focus:ring-pink-500"
                 />
                 <span>最少5花點</span>
               </label>
               <div className="h-4 w-px bg-slate-800" />
               <button
                 onClick={handleExportSelectedRoute}
-                className="bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 text-slate-950 font-black px-3 py-1 rounded-xl transition active:scale-95 flex items-center gap-1 text-[11px] shadow-lg shadow-amber-500/10"
+                className="bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 text-slate-950 font-black px-2.5 py-1 rounded-xl transition active:scale-95 flex items-center gap-1 text-[10px] sm:text-[11px]"
               >
-                👑 導航精選路線
+                👑 導航精選
               </button>
             </div>
           </div>
           
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="hidden lg:flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2 bg-slate-950/80 rounded-2xl p-2 border border-purple-500/30 text-xs">
               <div id="google-widget">
                 {googleUserEmail ? (
@@ -1523,72 +1551,80 @@ export default function App() {
       )}
 
       {/* Main Grid Content */}
-      <main className="max-w-7xl mx-auto px-4 md:px-6 mt-6 flex-grow w-full grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <main className={
+        hasEditPermission 
+          ? "max-w-7xl mx-auto px-4 md:px-6 mt-6 flex-grow w-full grid grid-cols-1 lg:grid-cols-12 gap-6"
+          : "max-w-md mx-auto px-4 mt-4 flex-grow w-full flex flex-col gap-4"
+      }>
         
-        {/* Left Column */}
-        <div className="lg:col-span-5 flex flex-col gap-6">
+        {/* Left Column (or Map Block in Viewer Mode) */}
+        <div className={hasEditPermission ? "lg:col-span-5 flex flex-col gap-6" : "flex flex-col gap-4"}>
           
-          {/* Battle Info Card */}
-          <div className="bg-slate-900/60 rounded-3xl p-5 border border-slate-800 flex flex-col gap-3 backdrop-blur-md">
-            <h2 className="font-bold text-xs text-slate-400 uppercase tracking-widest flex items-center justify-between">
-              <span>🗺️ 花田選擇</span>
-              <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${hasEditPermission ? "text-emerald-400 bg-emerald-500/10 border border-emerald-500/20" : "text-indigo-400 bg-indigo-500/10 border border-indigo-500/20"}`}>
-                {hasEditPermission ? "☁️ 雲端同步編輯權限" : "👁️ 雲端免登入唯讀"}
-              </span>
-            </h2>
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-2 text-sm text-pink-400 font-extrabold bg-pink-500/10 border border-pink-500/20 py-2 px-4 rounded-xl flex-grow">
-                <span>📍 目前部署：基隆東岸 {regionPoints.length} 花</span>
+          {hasEditPermission && (
+            <>
+              {/* Battle Info Card */}
+              <div className="bg-slate-900/60 rounded-3xl p-5 border border-slate-800 flex flex-col gap-3 backdrop-blur-md">
+                <h2 className="font-bold text-xs text-slate-400 uppercase tracking-widest flex items-center justify-between">
+                  <span>🗺️ 花田選擇</span>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${hasEditPermission ? "text-emerald-400 bg-emerald-500/10 border border-emerald-500/20" : "text-indigo-400 bg-indigo-500/10 border border-indigo-500/20"}`}>
+                    {hasEditPermission ? "☁️ 雲端同步編輯權限" : "👁️ 雲端免登入唯讀"}
+                  </span>
+                </h2>
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-2 text-sm text-pink-400 font-extrabold bg-pink-500/10 border border-pink-500/20 py-2 px-4 rounded-xl flex-grow">
+                    <span>📍 目前部署：基隆東岸 {regionPoints.length} 花</span>
+                  </div>
+                  <button onClick={() => {
+                    if (!hasEditPermission) {
+                      showToast("❌ 權限不足！請先登入具備編輯權限之帳號");
+                      playErrorBuzz();
+                      return;
+                    }
+                    setShowGPXModal(true);
+                  }} className="bg-slate-800 text-emerald-400 hover:bg-slate-700 border border-emerald-500/30 font-bold text-xs py-2 px-3 rounded-xl transition flex items-center justify-center gap-1.5 h-10">
+                    <i className="fa-solid fa-file-import"></i> 導入 GPX
+                  </button>
+                </div>
               </div>
-              <button onClick={() => {
-                if (!hasEditPermission) {
-                  showToast("❌ 權限不足！請先登入具備編輯權限之帳號");
-                  playErrorBuzz();
-                  return;
-                }
-                setShowGPXModal(true);
-              }} className="bg-slate-800 text-emerald-400 hover:bg-slate-700 border border-emerald-500/30 font-bold text-xs py-2 px-3 rounded-xl transition flex items-center justify-center gap-1.5 h-10">
-                <i className="fa-solid fa-file-import"></i> 導入 GPX
-              </button>
-            </div>
-          </div>
 
-          {/* Quick Command Card */}
-          <div className="bg-slate-900/60 rounded-3xl p-6 border border-slate-800 flex flex-col gap-4 backdrop-blur-md">
-            <div className="flex items-center justify-between">
-              <h2 className="font-bold text-base text-slate-100 flex items-center gap-2">
-                <i className="fa-solid fa-terminal text-pink-500"></i>
-                CLI Prompt
-              </h2>
-              <button onClick={toggleSound} className="text-pink-400 hover:text-pink-300 bg-pink-500/10 border border-pink-500/20 px-2.5 py-1 rounded-full text-[11px] font-semibold flex items-center gap-1.5 transition">
-                <i className={`fa-solid ${soundEnabled ? 'fa-volume-high' : 'fa-volume-xmark'}`}></i>
-                <span>音效：{soundEnabled ? '開' : '關'}</span>
-              </button>
-            </div>
+              {/* Quick Command Card */}
+              <div className="bg-slate-900/60 rounded-3xl p-6 border border-slate-800 flex flex-col gap-4 backdrop-blur-md">
+                <div className="flex items-center justify-between">
+                  <h2 className="font-bold text-base text-slate-100 flex items-center gap-2">
+                    <i className="fa-solid fa-terminal text-pink-500"></i>
+                    CLI Prompt
+                  </h2>
+                  <button onClick={toggleSound} className="text-pink-400 hover:text-pink-300 bg-pink-500/10 border border-pink-500/20 px-2.5 py-1 rounded-full text-[11px] font-semibold flex items-center gap-1.5 transition">
+                    <i className={`fa-solid ${soundEnabled ? 'fa-volume-high' : 'fa-volume-xmark'}`}></i>
+                    <span>音效：{soundEnabled ? '開' : '關'}</span>
+                  </button>
+                </div>
 
-            <div className="flex flex-col gap-1.5">
-              <div className="relative">
-                <input 
-                  type="text" 
-                  value={commandInput} 
-                  onChange={(e) => handleCommandInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") processCommandInput();
-                  }}
-                  placeholder="例如: 2//1h29m (權限不足時僅能觀看)" 
-                  className="w-full pl-4 pr-12 py-3 rounded-2xl bg-slate-950 border border-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm transition-all shadow-inner font-medium text-slate-200 placeholder-slate-600"
-                />
-                <button onClick={processCommandInput} className="absolute right-1.5 top-1.5 bottom-1.5 bg-purple-600 hover:bg-purple-700 text-white w-9 h-9 rounded-xl flex items-center justify-center transition active:scale-95 shadow">
-                  <i className="fa-solid fa-bolt"></i>
-                </button>
+                <div className="flex flex-col gap-1.5">
+                  <div className="relative">
+                    <input 
+                      type="text" 
+                      value={commandInput} 
+                      onChange={(e) => handleCommandInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") processCommandInput();
+                      }}
+                      placeholder="例如: 2//1h29m (權限不足時僅能觀看)" 
+                      className="w-full pl-4 pr-12 py-3 rounded-2xl bg-slate-950 border border-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm transition-all shadow-inner font-medium text-slate-200 placeholder-slate-600"
+                    />
+                    <button onClick={processCommandInput} className="absolute right-1.5 top-1.5 bottom-1.5 bg-purple-600 hover:bg-purple-700 text-white w-9 h-9 rounded-xl flex items-center justify-center transition active:scale-95 shadow">
+                      <i className="fa-solid fa-bolt"></i>
+                    </button>
+                  </div>
+                  <div id="cmd-feedback" className={`text-[11px] italic px-1 min-h-[1.2rem] ${commandFeedback.includes('❌') ? 'text-red-400' : commandFeedback.includes('成功') ? 'text-emerald-400 font-bold' : 'text-slate-500'}`}>
+                    <span>{commandFeedback}</span>
+                  </div>
+                </div>
               </div>
-              <div id="cmd-feedback" className={`text-[11px] italic px-1 min-h-[1.2rem] ${commandFeedback.includes('❌') ? 'text-red-400' : commandFeedback.includes('成功') ? 'text-emerald-400 font-bold' : 'text-slate-500'}`}>
-                <span>{commandFeedback}</span>
-              </div>
-            </div>
-          </div>
+            </>
+          )}
 
-          {/* Radar Map */}
+          {/* Radar Map (Always visible and kept mounted in DOM!) */}
           <div className="bg-slate-900/60 rounded-3xl p-4 border border-slate-800 flex flex-col gap-3 backdrop-blur-md">
             <div className="flex items-center justify-between px-2">
               <h2 className="font-bold text-base text-slate-100 flex items-center gap-2">
@@ -1608,236 +1644,357 @@ export default function App() {
               </div>
             </div>
             {/* The leaf map target container */}
-            <div ref={mapContainerRef} id="map" style={{ height: "420px" }}></div>
+            <div 
+              ref={mapContainerRef} 
+              id="map" 
+              style={{ height: hasEditPermission ? "420px" : "360px" }}
+              className="rounded-2xl overflow-hidden border border-slate-800"
+            ></div>
           </div>
 
         </div>
 
-        {/* Right Column */}
-        <div className="lg:col-span-7 flex flex-col gap-6">
+        {/* Right Column (or Mobile Feed Block in Viewer Mode) */}
+        <div className={hasEditPermission ? "lg:col-span-7 flex flex-col gap-6" : "flex flex-col gap-4"}>
           
-          {/* Quick Stats Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-slate-900/60 rounded-2xl p-4 border border-slate-800 flex items-center justify-between backdrop-blur-md">
-              <div>
-                <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">🌸 開花中</p>
-                <h3 id="stat-blooming-count" className="text-3xl font-black text-pink-500 mt-1">
-                  {totalBloomCount} <span className="text-xs font-normal text-slate-400">朵</span>
-                </h3>
-              </div>
-              <span className="text-2xl bg-pink-500/10 border border-pink-500/20 p-2.5 rounded-xl">🌸</span>
-            </div>
-            
-            <div className="bg-slate-900/60 rounded-2xl p-4 border border-slate-800 flex items-center justify-between backdrop-blur-md">
-              <div>
-                <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">🍃 回歸葉子</p>
-                <h3 id="stat-leaf-count" className="text-3xl font-black text-slate-500 mt-1">
-                  {totalLeafCount} <span className="text-xs font-normal text-slate-400">朵</span>
-                </h3>
-              </div>
-              <span className="text-2xl bg-slate-800/50 border border-slate-700/50 p-2.5 rounded-xl text-slate-400">🍃</span>
-            </div>
-
-            <div className="bg-gradient-to-br from-purple-950 via-slate-900 to-indigo-950 rounded-2xl p-4 border border-purple-500/20 text-white flex flex-col justify-between gap-2 shadow">
-              <div className="text-[11px] font-bold text-purple-300 tracking-wider">📋 同步與系統重置</div>
-              <div className="flex gap-2">
-                <button onClick={() => pullDataFromSheets(googleAccessToken, configSheetId)} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold py-2 px-3 rounded-xl transition duration-150 active:scale-95 flex items-center justify-center gap-1.5" id="btn-sync-now">
-                  <i className="fa-solid fa-cloud-arrow-down"></i> 立即同步雲端
-                </button>
-                <button onClick={copyMarkdownTable} className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold py-2 px-3 rounded-xl transition duration-150 active:scale-95 flex items-center justify-center gap-1" title="複製 Markdown">
-                  <i className="fa-solid fa-copy"></i>
-                </button>
-                <button onClick={() => setShowResetModal(true)} className="bg-red-500/20 hover:bg-red-500/40 text-red-400 border border-red-500/30 text-xs font-bold p-2 rounded-xl transition duration-150" title="重置為出廠預設">
-                  <i className="fa-solid fa-trash-can"></i>
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Monitors Table Container */}
-          <div className="bg-slate-900/60 rounded-3xl border border-slate-800 overflow-hidden flex flex-col flex-grow backdrop-blur-md">
-            
-            {/* Table Controller bar */}
-            <div className="border-b border-slate-800 bg-slate-950/80 px-6 py-4 flex flex-col gap-4">
-              <div className="flex items-center justify-between w-full">
-                <button className="text-sm font-black border-b-2 border-pink-500 pb-1 text-pink-400 transition flex items-center gap-1.5">
-                  <i className="fa-solid fa-list-ol mr-1"></i> 
-                  景點監控列表 (<span id="total-count-badge">{regionPoints.length}</span>)
-                </button>
-              </div>
-              
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 w-full">
-                <div className="relative">
-                  <input 
-                    type="text" 
-                    value={searchTerm} 
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    placeholder="搜尋景點..." 
-                    className="w-full pl-9 pr-4 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-purple-500"
-                  />
-                  <i className="fa-solid fa-magnifying-glass absolute left-3 top-3 text-slate-500 text-xs"></i>
+          {hasEditPermission ? (
+            <>
+              {/* Quick Stats Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-slate-900/60 rounded-2xl p-4 border border-slate-800 flex items-center justify-between backdrop-blur-md">
+                  <div>
+                    <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">🌸 開花中</p>
+                    <h3 id="stat-blooming-count" className="text-3xl font-black text-pink-500 mt-1">
+                      {totalBloomCount} <span className="text-xs font-normal text-slate-400">朵</span>
+                    </h3>
+                  </div>
+                  <span className="text-2xl bg-pink-500/10 border border-pink-500/20 p-2.5 rounded-xl">🌸</span>
                 </div>
                 
-                <select 
-                  value={statusFilter} 
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                  className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-2 text-xs text-slate-300 focus:outline-none focus:ring-1 focus:ring-purple-500 w-full"
-                >
-                  <option value="all">顯示所有狀態</option>
-                  <option value="ribbon">🎀 僅顯示飄帶中</option>
-                  <option value="blooming_only">🌸 僅顯示一般開花</option>
-                  <option value="dying_only">⚠️ 僅顯示快枯歸葉</option>
-                  <option value="leaf">🍃 僅顯示葉子</option>
-                  {/* Option Requirement 3: 15m Cluster */}
-                  <option value="cluster">👑 僅顯示精選 (最少5花點)</option>
-                </select>
-                
-                <select 
-                  value={sortSelector} 
-                  onChange={(e) => setSortSelector(e.target.value)}
-                  className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-2 text-xs text-pink-400 font-bold focus:outline-none focus:ring-1 focus:ring-pink-500 w-full"
-                >
-                  <option value="id_asc">🔢 排序：編號 (低 → 高)</option>
-                  <option value="id_desc">🔢 排序：編號 (高 → 低)</option>
-                  <option value="time_asc">⏳ 排序：剩餘花期 (短 → 長) 🚨</option>
-                  <option value="time_desc">⏳ 排序：剩餘花期 (長 → 短)</option>
-                  <option value="name_asc">🔤 排序：景點名稱 (A → Z)</option>
-                </select>
+                <div className="bg-slate-900/60 rounded-2xl p-4 border border-slate-800 flex items-center justify-between backdrop-blur-md">
+                  <div>
+                    <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">🍃 回歸葉子</p>
+                    <h3 id="stat-leaf-count" className="text-3xl font-black text-slate-500 mt-1">
+                      {totalLeafCount} <span className="text-xs font-normal text-slate-400">朵</span>
+                    </h3>
+                  </div>
+                  <span className="text-2xl bg-slate-800/50 border border-slate-700/50 p-2.5 rounded-xl text-slate-400">🍃</span>
+                </div>
+
+                <div className="bg-gradient-to-br from-purple-950 via-slate-900 to-indigo-950 rounded-2xl p-4 border border-purple-500/20 text-white flex flex-col justify-between gap-2 shadow">
+                  <div className="text-[11px] font-bold text-purple-300 tracking-wider">📋 同步與系統重置</div>
+                  <div className="flex gap-2">
+                    <button onClick={() => pullDataFromSheets(googleAccessToken, configSheetId)} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold py-2 px-3 rounded-xl transition duration-150 active:scale-95 flex items-center justify-center gap-1.5" id="btn-sync-now">
+                      <i className="fa-solid fa-cloud-arrow-down"></i> 立即同步雲端
+                    </button>
+                    <button onClick={copyMarkdownTable} className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold py-2 px-3 rounded-xl transition duration-150 active:scale-95 flex items-center justify-center gap-1" title="複製 Markdown">
+                      <i className="fa-solid fa-copy"></i>
+                    </button>
+                    <button onClick={() => setShowResetModal(true)} className="bg-red-500/20 hover:bg-red-500/40 text-red-400 border border-red-500/30 text-xs font-bold p-2 rounded-xl transition duration-150" title="重置為出廠預設">
+                      <i className="fa-solid fa-trash-can"></i>
+                    </button>
+                  </div>
+                </div>
               </div>
-            </div>
 
-            {/* Table Monitor list */}
-            <div id="tab-monitor-container" className="overflow-x-auto max-h-[500px]">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-slate-950/40 border-b border-slate-800 text-slate-400 text-[11px] font-bold tracking-wider uppercase">
-                    <th className="py-3 px-4 text-center w-14">編號</th>
-                    <th className="py-3 px-4">地標名稱 / 經緯度</th>
-                    <th className="py-3 px-4">當前狀態</th>
-                    <th className="py-3 px-4">枯萎倒數</th>
-                    <th className="py-3 px-4 text-right pr-6">操作</th>
-                  </tr>
-                </thead>
-                <tbody id="table-body" className="divide-y divide-slate-800/60 text-sm font-medium">
-                  {sortedPoints.length > 0 ? (
-                    sortedPoints.map((item) => {
-                      let statusBadge: ReactNode = null;
-                      let countdownLabel: ReactNode = null;
+              {/* Monitors Table Container */}
+              <div className="bg-slate-900/60 rounded-3xl border border-slate-800 overflow-hidden flex flex-col flex-grow backdrop-blur-md">
+                
+                {/* Table Controller bar */}
+                <div className="border-b border-slate-800 bg-slate-950/80 px-6 py-4 flex flex-col gap-4">
+                  <div className="flex items-center justify-between w-full">
+                    <button className="text-sm font-black border-b-2 border-pink-500 pb-1 text-pink-400 transition flex items-center gap-1.5">
+                      <i className="fa-solid fa-list-ol mr-1"></i> 
+                      景點監控列表 (<span id="total-count-badge">{regionPoints.length}</span>)
+                    </button>
+                  </div>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 w-full">
+                    <div className="relative">
+                      <input 
+                        type="text" 
+                        value={searchTerm} 
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        placeholder="搜尋景點..." 
+                        className="w-full pl-9 pr-4 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                      />
+                      <i className="fa-solid fa-magnifying-glass absolute left-3 top-3 text-slate-500 text-xs"></i>
+                    </div>
+                    
+                    <select 
+                      value={statusFilter} 
+                      onChange={(e) => setStatusFilter(e.target.value)}
+                      className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-2 text-xs text-slate-300 focus:outline-none focus:ring-1 focus:ring-purple-500 w-full"
+                    >
+                      <option value="all">顯示所有狀態</option>
+                      <option value="ribbon">🎀 僅顯示飄帶中</option>
+                      <option value="blooming_only">🌸 僅顯示一般開花</option>
+                      <option value="dying_only">⚠️ 僅顯示快枯歸葉</option>
+                      <option value="leaf">🍃 僅顯示葉子</option>
+                      <option value="cluster">👑 僅顯示精選 (最少5花點)</option>
+                    </select>
+                    
+                    <select 
+                      value={sortSelector} 
+                      onChange={(e) => setSortSelector(e.target.value)}
+                      className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-2 text-xs text-pink-400 font-bold focus:outline-none focus:ring-1 focus:ring-pink-500 w-full"
+                    >
+                      <option value="id_asc">🔢 排序：編號 (低 → 高)</option>
+                      <option value="id_desc">🔢 排序：編號 (高 → 低)</option>
+                      <option value="time_asc">⏳ 排序：剩餘花期 (短 → 長) 🚨</option>
+                      <option value="time_desc">⏳ 排序：剩餘花期 (長 → 短)</option>
+                      <option value="name_asc">🔤 排序：景點名稱 (A → Z)</option>
+                    </select>
+                  </div>
+                </div>
 
-                      if (item.isBlooming) {
-                        if (item.statusKey === 'ribbon') {
-                          statusBadge = (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">
-                              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping"></span>
-                              🎀 飄帶中
-                            </span>
-                          );
-                        } else if (item.statusKey === 'dying') {
-                          statusBadge = (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black bg-amber-500/15 text-amber-400 border border-amber-500/30 animate-pulse">
-                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-                              ⚠️ 臨枯萎
-                            </span>
-                          );
-                        } else {
-                          statusBadge = (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black bg-pink-500/10 text-pink-400 border border-pink-500/30">
-                              <span className="w-1.5 h-1.5 rounded-full bg-pink-500"></span>
-                              🌸 開花中
-                            </span>
-                          );
-                        }
+                {/* Table Monitor list */}
+                <div id="tab-monitor-container" className="overflow-x-auto max-h-[500px]">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-950/40 border-b border-slate-800 text-slate-400 text-[11px] font-bold tracking-wider uppercase">
+                        <th className="py-3 px-4 text-center w-14">編號</th>
+                        <th className="py-3 px-4">地標名稱 / 經緯度</th>
+                        <th className="py-3 px-4">當前狀態</th>
+                        <th className="py-3 px-4">枯萎倒數</th>
+                        <th className="py-3 px-4 text-right pr-6">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody id="table-body" className="divide-y divide-slate-800/60 text-sm font-medium">
+                      {sortedPoints.length > 0 ? (
+                        sortedPoints.map((item) => {
+                          let statusBadge: ReactNode = null;
+                          let countdownLabel: ReactNode = null;
 
-                        const totalDuration = 23 * 60 * 60 * 1000;
-                        const expTime = new Date(item.expire!).getTime();
-                        const progressPercent = Math.max(0, Math.min(100, (1 - ((expTime - now) / totalDuration)) * 100));
+                          if (item.isBlooming) {
+                            if (item.statusKey === 'ribbon') {
+                              statusBadge = (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping"></span>
+                                  🎀 飄帶中
+                                </span>
+                              );
+                            } else if (item.statusKey === 'dying') {
+                              statusBadge = (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black bg-amber-500/15 text-amber-400 border border-amber-500/30 animate-pulse">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                                  ⚠️ 臨枯萎
+                                </span>
+                              );
+                            } else {
+                              statusBadge = (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black bg-pink-500/10 text-pink-400 border border-pink-500/30">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-pink-500"></span>
+                                  🌸 開花中
+                                </span>
+                              );
+                            }
 
-                        const h = Math.floor(item.remainingSecs / 3600);
-                        const m = Math.floor((item.remainingSecs % 3600) / 60);
-                        const s = item.remainingSecs % 60;
+                            const totalDuration = 23 * 60 * 60 * 1000;
+                            const expTime = new Date(item.expire!).getTime();
+                            const progressPercent = Math.max(0, Math.min(100, (1 - ((expTime - now) / totalDuration)) * 100));
 
-                        if (item.statusKey === 'dying') {
-                          const totalMinsLeft = Math.ceil(item.remainingSecs / 60);
-                          countdownLabel = (
-                            <div className="space-y-1">
-                              <div className="font-bold text-xs text-amber-400 animate-pulse">還有 {totalMinsLeft} 分變回葉子</div>
-                              <div className="w-24 bg-slate-800 rounded-full h-1 overflow-hidden">
-                                <div className="bg-amber-500 h-1 rounded-full" style={{ width: `${100 - progressPercent}%` }}></div>
-                              </div>
-                            </div>
+                            const h = Math.floor(item.remainingSecs / 3600);
+                            const m = Math.floor((item.remainingSecs % 3600) / 60);
+                            const s = item.remainingSecs % 60;
+
+                            if (item.statusKey === 'dying') {
+                              const totalMinsLeft = Math.ceil(item.remainingSecs / 60);
+                              countdownLabel = (
+                                <div className="space-y-1">
+                                  <div className="font-bold text-xs text-amber-400 animate-pulse">還有 {totalMinsLeft} 分變回葉子</div>
+                                  <div className="w-24 bg-slate-800 rounded-full h-1 overflow-hidden">
+                                    <div className="bg-amber-500 h-1 rounded-full" style={{ width: `${100 - progressPercent}%` }}></div>
+                                  </div>
+                                </div>
+                              );
+                            } else {
+                              countdownLabel = (
+                                <div className="space-y-1">
+                                  <div className="font-mono text-xs font-bold text-slate-200">
+                                    {h.toString().padStart(2, '0')}:{m.toString().padStart(2, '0')}:{s.toString().padStart(2, '0')}
+                                  </div>
+                                  <div className="w-24 bg-slate-800 rounded-full h-1 overflow-hidden">
+                                    <div className="bg-gradient-to-r from-pink-500 to-purple-500 h-1 rounded-full" style={{ width: `${100 - progressPercent}%` }}></div>
+                                  </div>
+                                </div>
+                              );
+                            }
+                          } else {
+                            statusBadge = (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-800/60 text-slate-400 border border-slate-700/40">
+                                🍃 葉子狀態
+                              </span>
+                            );
+                            countdownLabel = <span className="text-slate-600 text-[11px]">已歸地</span>;
+                          }
+
+                          return (
+                            <tr key={item.id} id={`row-${item.id}`} className="hover:bg-slate-900/50 transition border-b border-slate-800/40 align-middle">
+                              <td className="py-3 px-4 text-center font-bold text-slate-500">{item.id}</td>
+                              <td className="py-3 px-4 cursor-pointer" onClick={() => {
+                                if (mapRef.current) {
+                                  mapRef.current.setView([item.lat, item.lng], 16);
+                                }
+                                highlightRowInTable(item.id);
+                              }}>
+                                <div className="font-bold text-slate-200 hover:text-pink-400 transition flex items-center gap-1.5">
+                                  {item.name}
+                                  {item.isClusterMember && item.isBlooming && (
+                                    <span className="text-[10px] bg-amber-500/20 border border-amber-500/30 text-amber-300 font-extrabold px-1.5 py-0.5 rounded flex items-center gap-0.5" title="屬於 15 分鐘內超過 5 朵的密集開花精選">
+                                      👑 精選
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[10px] font-mono text-slate-500 flex items-center gap-1 mt-0.5">
+                                  <i className="fa-solid fa-location-dot"></i> {item.lat.toFixed(6)}, {item.lng.toFixed(6)}
+                                </div>
+                              </td>
+                              <td className="py-3 px-4">{statusBadge}</td>
+                              <td className="py-3 px-4">{countdownLabel}</td>
+                              <td className="py-3 px-4 text-right pr-6">
+                                <div className="flex justify-end items-center gap-3">
+                                  {item.isBlooming && item.expire && (
+                                    <span className="text-[11px] text-slate-400 font-medium">
+                                      於 {formatDateTimeShort(item.expire)} 枯萎
+                                    </span>
+                                  )}
+                                  <button 
+                                    onClick={() => triggerEditModal(item.id)}
+                                    className="text-slate-500 hover:text-slate-300 p-1.5 rounded transition"
+                                  >
+                                    <i className="fa-solid fa-pencil"></i>
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
                           );
-                        } else {
-                          countdownLabel = (
-                            <div className="space-y-1">
-                              <div className="font-mono text-xs font-bold text-slate-200">
-                                {h.toString().padStart(2, '0')}:{m.toString().padStart(2, '0')}:{s.toString().padStart(2, '0')}
-                              </div>
-                              <div className="w-24 bg-slate-800 rounded-full h-1 overflow-hidden">
-                                <div className="bg-gradient-to-r from-pink-500 to-purple-500 h-1 rounded-full" style={{ width: `${100 - progressPercent}%` }}></div>
-                              </div>
-                            </div>
-                          );
-                        }
-                      } else {
-                        statusBadge = (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-800/60 text-slate-400 border border-slate-700/40">
-                            🍃 葉子狀態
+                        })
+                      ) : (
+                        <tr>
+                          <td colSpan={5} className="text-center py-8 text-slate-500 text-xs">無符合條件的花朵點位</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+              </div>
+            </>
+          ) : (
+            /* Simplified mobile landmarks list strictly sorted by wither countdown */
+            <div className="bg-slate-900/60 rounded-3xl p-4 border border-slate-800 flex flex-col gap-4 backdrop-blur-md">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                <h2 className="font-black text-sm text-slate-100 flex items-center gap-2">
+                  <i className="fa-solid fa-clock text-pink-500"></i>
+                  枯萎倒數監控 ({processedPoints.filter(p => p.isBlooming).length} 朵開花中)
+                </h2>
+              </div>
+              
+              {/* Quick Search bar */}
+              <div className="relative">
+                <input 
+                  type="text" 
+                  value={searchTerm} 
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="快速搜尋基隆東岸地標..." 
+                  className="w-full pl-9 pr-4 py-2.5 rounded-2xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                />
+                <i className="fa-solid fa-magnifying-glass absolute left-3 top-3.5 text-slate-500 text-xs"></i>
+              </div>
+
+              {/* Scrollable list of bento-style cards */}
+              <div className="flex flex-col gap-2.5 max-h-[500px] overflow-y-auto pr-1">
+                {sortedPoints.length > 0 ? (
+                  sortedPoints.map((item) => {
+                    let statusBadge: ReactNode = null;
+                    let countdownLabel: ReactNode = null;
+
+                    if (item.isBlooming) {
+                      const h = Math.floor(item.remainingSecs / 3600);
+                      const m = Math.floor((item.remainingSecs % 3600) / 60);
+                      const s = item.remainingSecs % 60;
+
+                      if (item.statusKey === 'dying') {
+                        const totalMinsLeft = Math.ceil(item.remainingSecs / 60);
+                        countdownLabel = (
+                          <span className="text-xs font-black text-amber-400 animate-pulse">
+                            還有 {totalMinsLeft} 分變葉
                           </span>
                         );
-                        countdownLabel = <span className="text-slate-600 text-[11px]">已歸地</span>;
+                        statusBadge = (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500/10 text-amber-400 border border-amber-500/30 animate-pulse">
+                            快枯萎
+                          </span>
+                        );
+                      } else {
+                        countdownLabel = (
+                          <span className="font-mono text-xs font-bold text-pink-400">
+                            🌸 {h.toString().padStart(2, '0')}:{m.toString().padStart(2, '0')}:{s.toString().padStart(2, '0')}
+                          </span>
+                        );
+                        statusBadge = (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-pink-500/10 text-pink-400 border border-pink-500/30">
+                            開花中
+                          </span>
+                        );
                       }
-
-                      return (
-                        <tr key={item.id} id={`row-${item.id}`} className="hover:bg-slate-900/50 transition border-b border-slate-800/40 align-middle">
-                          <td className="py-3 px-4 text-center font-bold text-slate-500">{item.id}</td>
-                          <td className="py-3 px-4 cursor-pointer" onClick={() => {
-                            if (mapRef.current) {
-                              mapRef.current.setView([item.lat, item.lng], 16);
-                            }
-                            highlightRowInTable(item.id);
-                          }}>
-                            <div className="font-bold text-slate-200 hover:text-pink-400 transition flex items-center gap-1.5">
-                              {item.name}
-                              {item.isClusterMember && item.isBlooming && (
-                                <span className="text-[10px] bg-amber-500/20 border border-amber-500/30 text-amber-300 font-extrabold px-1.5 py-0.5 rounded flex items-center gap-0.5" title="屬於 15 分鐘內超過 5 朵的密集開花精選">
-                                  👑 精選
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-[10px] font-mono text-slate-500 flex items-center gap-1 mt-0.5">
-                              <i className="fa-solid fa-location-dot"></i> {item.lat.toFixed(6)}, {item.lng.toFixed(6)}
-                            </div>
-                          </td>
-                          <td className="py-3 px-4">{statusBadge}</td>
-                          <td className="py-3 px-4">{countdownLabel}</td>
-                          <td className="py-3 px-4 text-right pr-6">
-                            <div className="flex justify-end items-center gap-3">
-                              {item.isBlooming && item.expire && (
-                                <span className="text-[11px] text-slate-400 font-medium">
-                                  於 {formatDateTimeShort(item.expire)} 枯萎
-                                </span>
-                              )}
-                              <button 
-                                onClick={() => triggerEditModal(item.id)}
-                                className="text-slate-500 hover:text-slate-300 p-1.5 rounded transition"
-                              >
-                                <i className="fa-solid fa-pencil"></i>
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
+                    } else {
+                      statusBadge = (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-800/60 text-slate-400 border border-slate-700/40">
+                          葉子狀態
+                        </span>
                       );
-                    })
-                  ) : (
-                    <tr>
-                      <td colSpan={5} className="text-center py-8 text-slate-500 text-xs">無符合條件的花朵點位</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                      countdownLabel = <span className="text-slate-600 text-[10px]">已歸地</span>;
+                    }
 
-          </div>
+                    return (
+                      <div 
+                        key={item.id} 
+                        onClick={() => {
+                          if (mapRef.current) {
+                            mapRef.current.setView([item.lat, item.lng], 16);
+                          }
+                          highlightRowInTable(item.id);
+                        }}
+                        className="bg-slate-950/40 border border-slate-800/60 hover:bg-slate-900/60 transition-all rounded-2xl p-3 flex items-center justify-between cursor-pointer active:scale-[0.98]"
+                      >
+                        <div className="flex flex-col gap-0.5">
+                          <div className="font-bold text-slate-200 text-xs flex items-center gap-1.5">
+                            <span className="text-slate-500 font-mono text-[10px]">#{item.id}</span>
+                            <span className="text-slate-200">{item.name}</span>
+                            {item.isClusterMember && item.isBlooming && (
+                              <span className="text-[9px] bg-amber-500/20 border border-amber-500/30 text-amber-300 font-extrabold px-1.5 py-0.5 rounded">
+                                👑 精選
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[9px] text-slate-500 font-medium">
+                            📍 {item.lat.toFixed(5)}, {item.lng.toFixed(5)}
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-end gap-1">
+                          {statusBadge}
+                          <div className="flex items-center gap-1">
+                            {countdownLabel}
+                            {item.isBlooming && item.expire && (
+                              <span className="text-[10px] text-slate-500 font-normal">
+                                (於 {formatDateTimeShort(item.expire)} 變葉)
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="text-center py-12 text-slate-500 text-xs">
+                    無符合條件的花朵點位
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
         </div>
       </main>
