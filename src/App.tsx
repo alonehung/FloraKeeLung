@@ -1469,7 +1469,7 @@ export default function App() {
                     花嶼雞籠 
                     <span className="text-[10px] bg-red-500 text-white font-extrabold px-1.5 py-0.5 rounded-full tracking-normal">測試版</span>
                   </h1>
-                  <p className="text-purple-300 text-[10px] sm:text-xs tracking-wider">基隆東岸特攻雷達與智慧種植系統</p>
+                  <p className="text-purple-300 text-[10px] sm:text-xs tracking-wider">以花為墨，以地為紙，把你的足跡，種進基隆的四季裡</p>
                 </div>
               </div>
 
@@ -1629,7 +1629,7 @@ export default function App() {
             <div className="flex items-center justify-between px-2">
               <h2 className="font-bold text-base text-slate-100 flex items-center gap-2">
                 <i className="fa-solid fa-map-location-dot text-indigo-400"></i>
-                戰域雷達地圖
+                種花雷達地圖
               </h2>
               <div className="flex gap-2 text-[10px]">
                 <span className="flex items-center gap-1 text-slate-400">
