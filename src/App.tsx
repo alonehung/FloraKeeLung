@@ -171,6 +171,11 @@ export default function App() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showGPXModal, setShowGPXModal] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
+  const [showNavModal, setShowNavModal] = useState(false);
+  const [navGoogleUrl, setNavGoogleUrl] = useState("");
+  const [navAppleUrl, setNavAppleUrl] = useState("");
+  const [navPath, setNavPath] = useState<{ id: number; name: string }[]>([]);
+  const [isNavLocating, setIsNavLocating] = useState(false);
 
   // Form Fields inside Modals
   const [configClientId, setConfigClientId] = useState(DEFAULT_CLIENT_ID);
@@ -816,6 +821,36 @@ export default function App() {
     setStatusFilter(checked ? "cluster" : "all");
   };
 
+  const skipNavGeolocation = () => {
+    const activeClusterPoints = processedPoints.filter(p => p.region === activeRegion && p.isBlooming && p.isClusterMember);
+    if (activeClusterPoints.length === 0) return;
+
+    const path = [...activeClusterPoints].sort((a, b) => a.id - b.id);
+    const origin = `${path[0].lat},${path[0].lng}`;
+    const destination = `${path[path.length - 1].lat},${path[path.length - 1].lng}`;
+    
+    let waypoints = "";
+    if (path.length > 2) {
+      const intermediate = path.slice(1, path.length - 1);
+      waypoints = intermediate.map(p => `${p.lat},${p.lng}`).join("|");
+    }
+    
+    let gUrl = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}`;
+    if (waypoints) {
+      gUrl += `&waypoints=${encodeURIComponent(waypoints)}`;
+    }
+    gUrl += `&travelmode=driving`;
+
+    const aUrl = `https://maps.apple.com/?saddr=${origin}&daddr=${origin}&dirflg=d`;
+
+    setNavGoogleUrl(gUrl);
+    setNavAppleUrl(aUrl);
+    setNavPath(path.map(p => ({ id: p.id, name: p.name })));
+    setIsNavLocating(false);
+    showToast("🚗 已改用首站為起點規劃導航！");
+    playSynthChime();
+  };
+
   const handleExportSelectedRoute = () => {
     // 1. Get all active cluster/featured points
     const activeClusterPoints = processedPoints.filter(p => p.region === activeRegion && p.isBlooming && p.isClusterMember);
@@ -826,7 +861,14 @@ export default function App() {
       return;
     }
 
-    // 2. Nearest Neighbor heuristic for the Traveling Salesperson Problem (TSP)
+    setNavGoogleUrl("");
+    setNavAppleUrl("");
+    setNavPath([]);
+    setIsNavLocating(true);
+    setShowNavModal(true);
+    playSynthChime();
+
+    // Nearest Neighbor solver
     const solveTSP = (points: typeof activeClusterPoints, startLat?: number, startLng?: number) => {
       const remaining = [...points];
       const path: typeof activeClusterPoints = [];
@@ -863,28 +905,42 @@ export default function App() {
       return path;
     };
 
-    const buildGoogleMapsUrl = (path: typeof activeClusterPoints) => {
-      if (path.length === 0) return "";
+    const buildUrlsAndSet = (path: typeof activeClusterPoints, startLat?: number, startLng?: number) => {
+      if (path.length === 0) return;
       
-      const origin = `${path[0].lat},${path[0].lng}`;
-      const destination = `${path[path.length - 1].lat},${path[path.length - 1].lng}`;
+      // Google Maps
+      const gOrigin = startLat !== undefined ? `${startLat},${startLng}` : `${path[0].lat},${path[0].lng}`;
+      const gDestination = `${path[path.length - 1].lat},${path[path.length - 1].lng}`;
       
-      let waypoints = "";
-      if (path.length > 2) {
-        const intermediate = path.slice(1, path.length - 1);
-        waypoints = intermediate.map(p => `${p.lat},${p.lng}`).join("|");
+      let gWaypoints = "";
+      if (startLat !== undefined) {
+        if (path.length > 1) {
+          const intermediate = path.slice(0, path.length - 1);
+          gWaypoints = intermediate.map(p => `${p.lat},${p.lng}`).join("|");
+        }
+      } else {
+        if (path.length > 2) {
+          const intermediate = path.slice(1, path.length - 1);
+          gWaypoints = intermediate.map(p => `${p.lat},${p.lng}`).join("|");
+        }
       }
       
-      let url = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}`;
-      if (waypoints) {
-        url += `&waypoints=${encodeURIComponent(waypoints)}`;
+      let gUrl = `https://www.google.com/maps/dir/?api=1&origin=${gOrigin}&destination=${gDestination}`;
+      if (gWaypoints) {
+        gUrl += `&waypoints=${encodeURIComponent(gWaypoints)}`;
       }
-      url += `&travelmode=driving`;
-      return url;
-    };
+      gUrl += `&travelmode=driving`;
 
-    showToast("👑 正在以最短路徑規劃導航路線...");
-    playSynthChime();
+      // Apple Maps
+      const aOrigin = startLat !== undefined ? `${startLat},${startLng}` : `${path[0].lat},${path[0].lng}`;
+      const aDestination = `${path[0].lat},${path[0].lng}`;
+      let aUrl = `https://maps.apple.com/?saddr=${aOrigin}&daddr=${aDestination}&dirflg=d`;
+
+      setNavGoogleUrl(gUrl);
+      setNavAppleUrl(aUrl);
+      setNavPath(path.map(p => ({ id: p.id, name: p.name })));
+      setIsNavLocating(false);
+    };
 
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -892,24 +948,20 @@ export default function App() {
           const userLat = pos.coords.latitude;
           const userLng = pos.coords.longitude;
           const path = solveTSP(activeClusterPoints, userLat, userLng);
-          const url = buildGoogleMapsUrl(path);
-          window.open(url, "_blank");
-          showToast("🚗 導航規劃成功！已包含您的起點");
+          buildUrlsAndSet(path, userLat, userLng);
+          showToast("🚗 已自動為您規劃含目前位置的最佳導航！");
         },
         (err) => {
-          console.warn("Geolocation failed or denied, using first landmark as start", err);
+          console.warn("Geolocation failed or denied", err);
           const path = solveTSP(activeClusterPoints);
-          const url = buildGoogleMapsUrl(path);
-          window.open(url, "_blank");
-          showToast("🚗 導航規劃成功！自首站出發");
+          buildUrlsAndSet(path);
+          showToast("⚠️ 定位失敗，已為您改用首站起點之導航規劃！");
         },
         { timeout: 3500, enableHighAccuracy: true }
       );
     } else {
       const path = solveTSP(activeClusterPoints);
-      const url = buildGoogleMapsUrl(path);
-      window.open(url, "_blank");
-      showToast("🚗 導航規劃成功！自首站出發");
+      buildUrlsAndSet(path);
     }
   };
 
@@ -2168,6 +2220,118 @@ export default function App() {
             <div className="pt-5 flex gap-2 justify-center">
               <button onClick={() => setShowResetModal(false)} className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold px-4 py-2.5 rounded-xl text-xs transition">取消</button>
               <button onClick={resetDataToDefault} className="bg-red-500 hover:bg-red-600 text-white font-bold px-5 py-2.5 rounded-xl text-xs transition shadow-md">確認清除</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Navigation Modal */}
+      {showNavModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-md flex items-end sm:items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-t-3xl sm:rounded-3xl w-full max-w-md p-6 shadow-2xl animate-in fade-in slide-in-from-bottom-8 duration-200">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">🗺️</span>
+                <h3 className="font-black text-sm sm:text-base text-slate-100">精選花點導航規劃</h3>
+              </div>
+              <button onClick={() => setShowNavModal(false)} className="text-slate-500 hover:text-slate-300 p-1 transition">
+                <i className="fa-solid fa-circle-xmark text-lg"></i>
+              </button>
+            </div>
+
+            {isNavLocating ? (
+              <div className="py-12 flex flex-col items-center justify-center gap-4">
+                <div className="w-10 h-10 border-4 border-pink-500/20 border-t-pink-500 rounded-full animate-spin"></div>
+                <div className="text-center space-y-1">
+                  <p className="text-xs text-slate-300 font-bold">正在取得您的 GPS 目前定位...</p>
+                  <p className="text-[10px] text-slate-500">這將用於計算最優最短順序路徑</p>
+                </div>
+                <button 
+                  onClick={skipNavGeolocation} 
+                  className="mt-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs px-4 py-2 rounded-xl transition"
+                >
+                  ⚡ 跳過定位，直接自首站出發
+                </button>
+              </div>
+            ) : (
+              <div className="py-4 space-y-4">
+                {/* Route sequence summary */}
+                <div className="bg-slate-950/60 p-3.5 rounded-2xl border border-slate-800/80 space-y-2">
+                  <div className="text-[11px] font-bold text-slate-400 flex items-center justify-between">
+                    <span>👑 最優規劃路徑 ({navPath.length} 站)</span>
+                    <span className="text-[10px] text-pink-400">連續最短路線</span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs max-h-[120px] overflow-y-auto">
+                    {navPath.map((item, idx) => (
+                      <div key={idx} className="flex items-center gap-1 bg-slate-900 border border-slate-800/60 px-2 py-1 rounded-lg">
+                        <span className="text-pink-400 font-bold font-mono text-[10px]">#{item.id}</span>
+                        <span className="text-slate-300 text-[10px] font-medium max-w-[80px] truncate">{item.name}</span>
+                        {idx < navPath.length - 1 && <i className="fa-solid fa-chevron-right text-[8px] text-slate-600 ml-1"></i>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Main app launch options */}
+                <div className="space-y-2.5">
+                  <p className="text-slate-400 text-[11px] font-semibold">請選擇您手機上要開啟的導航地圖應用程式：</p>
+                  
+                  {/* Google Maps universal link option */}
+                  {navGoogleUrl && (
+                    <a 
+                      href={navGoogleUrl} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-extrabold p-3.5 rounded-2xl text-xs sm:text-sm transition shadow-lg flex items-center justify-center gap-2.5 active:scale-[0.99]"
+                    >
+                      <i className="fa-brands fa-google text-lg"></i>
+                      <span>開啟 Google Maps (支援多停靠點)</span>
+                    </a>
+                  )}
+
+                  {/* Apple Maps option */}
+                  {navAppleUrl && (
+                    <a 
+                      href={navAppleUrl} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="w-full bg-slate-100 hover:bg-white text-slate-950 font-extrabold p-3.5 rounded-2xl text-xs sm:text-sm transition shadow-lg flex items-center justify-center gap-2.5 active:scale-[0.99]"
+                    >
+                      <i className="fa-solid fa-apple-whole text-lg"></i>
+                      <span>開啟 Apple Maps (iPhone 專用首站)</span>
+                    </a>
+                  )}
+                </div>
+
+                {/* Link copier action */}
+                <div className="pt-1">
+                  <button 
+                    onClick={() => {
+                      if (!navGoogleUrl) return;
+                      const tempTextarea = document.createElement('textarea');
+                      tempTextarea.value = navGoogleUrl;
+                      document.body.appendChild(tempTextarea);
+                      tempTextarea.select();
+                      document.execCommand('copy');
+                      document.body.removeChild(tempTextarea);
+                      showToast("📋 導航路徑連結已複製！可貼到 LINE 分享");
+                    }} 
+                    className="w-full bg-slate-950 hover:bg-slate-900 text-slate-400 hover:text-slate-300 border border-slate-800 text-xs py-2.5 rounded-xl transition flex items-center justify-center gap-1.5"
+                  >
+                    <i className="fa-solid fa-copy"></i>
+                    <span>複製完整的 Google Maps 路線連結</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="pt-4 border-t border-slate-800 flex justify-end">
+              <button 
+                onClick={() => setShowNavModal(false)} 
+                className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold px-5 py-2.5 rounded-xl text-xs transition"
+              >
+                關閉視窗
+              </button>
             </div>
           </div>
         </div>
