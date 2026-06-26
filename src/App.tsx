@@ -983,6 +983,12 @@ export default function App() {
       } else {
         statusKey = 'blooming';
       }
+    } else if (item.expire) {
+      const expTime = new Date(item.expire).getTime();
+      const elapsedMs = now - expTime;
+      if (elapsedMs >= 0 && elapsedMs <= 20 * 60 * 1000) {
+        statusKey = 'pending_report';
+      }
     }
 
     const isClusterMember = clusterIds.has(item.id);
@@ -1009,6 +1015,8 @@ export default function App() {
       matchesStatus = (item.statusKey === 'dying');
     } else if (statusFilter === 'leaf') {
       matchesStatus = (item.statusKey === 'leaf');
+    } else if (statusFilter === 'pending_report') {
+      matchesStatus = (item.statusKey === 'pending_report');
     } else if (statusFilter === 'cluster') {
       matchesStatus = item.isBlooming && item.isClusterMember;
     }
@@ -1026,12 +1034,20 @@ export default function App() {
     } else if (activeSort === 'time_asc') {
       if (!a.isBlooming && b.isBlooming) return 1;
       if (a.isBlooming && !b.isBlooming) return -1;
-      if (!a.isBlooming && !b.isBlooming) return a.id - b.id;
+      if (!a.isBlooming && !b.isBlooming) {
+        if (a.statusKey === 'pending_report' && b.statusKey !== 'pending_report') return -1;
+        if (a.statusKey !== 'pending_report' && b.statusKey === 'pending_report') return 1;
+        return a.id - b.id;
+      }
       return a.remainingSecs - b.remainingSecs;
     } else if (activeSort === 'time_desc') {
       if (!a.isBlooming && b.isBlooming) return 1;
       if (a.isBlooming && !b.isBlooming) return -1;
-      if (!a.isBlooming && !b.isBlooming) return a.id - b.id;
+      if (!a.isBlooming && !b.isBlooming) {
+        if (a.statusKey === 'pending_report' && b.statusKey !== 'pending_report') return -1;
+        if (a.statusKey !== 'pending_report' && b.statusKey === 'pending_report') return 1;
+        return a.id - b.id;
+      }
       return b.remainingSecs - a.remainingSecs;
     } else if (activeSort === 'name_asc') {
       return a.name.localeCompare(b.name, 'zh-Hant');
@@ -1057,6 +1073,7 @@ export default function App() {
       else if (statusFilter === 'blooming_only') isFilterMatched = item.isBlooming;
       else if (statusFilter === 'dying_only') isFilterMatched = (item.statusKey === 'dying');
       else if (statusFilter === 'leaf') isFilterMatched = (item.statusKey === 'leaf');
+      else if (statusFilter === 'pending_report') isFilterMatched = (item.statusKey === 'pending_report');
       else if (statusFilter === 'cluster') isFilterMatched = item.isBlooming && item.isClusterMember;
 
       if (!isSearchMatched || !isFilterMatched) return;
@@ -1086,6 +1103,20 @@ export default function App() {
             </div>
             <div class="bg-slate-950/90 text-white font-extrabold text-[9px] px-1.5 py-0.5 rounded-full shadow-lg mt-1 border border-pink-400 whitespace-nowrap">
               #${item.id} ${item.name} ${item.isClusterMember ? '👑' : ''}
+            </div>
+          </div>
+        `;
+      } else if (item.statusKey === 'pending_report') {
+        const elapsedMins = Math.floor((now - new Date(item.expire!).getTime()) / 60000);
+        const minsLeft = Math.max(0, 20 - elapsedMins);
+
+        markerHtml = `
+          <div class="flex flex-col items-center justify-center">
+            <div class="pulse-orange w-7 h-7 flex items-center justify-center text-white text-[12px] shadow-md font-bold border-2 border-orange-400">
+              ⏳
+            </div>
+            <div class="bg-slate-950/90 text-orange-400 font-extrabold text-[9px] px-1.5 py-0.5 rounded-full shadow-lg mt-1 border border-orange-500 whitespace-nowrap animate-pulse">
+              #${item.id} 等待回報 (${minsLeft}m)
             </div>
           </div>
         `;
@@ -1128,6 +1159,11 @@ export default function App() {
           tooltipContent += `<span class="text-amber-600 font-black">👑 15m 精選點</span><br>`;
         }
         tooltipContent += `剩餘時間: ${h}h ${m}m ${s}s<br>枯萎時間: ${formatDateLabel(item.expire)}</div>`;
+      } else if (item.statusKey === 'pending_report') {
+        const elapsedMins = Math.floor((now - new Date(item.expire!).getTime()) / 60000);
+        const minsLeft = Math.max(0, 20 - elapsedMins);
+        tooltipContent += `<span class="text-orange-600 font-black">⏳ 等待回報中</span><br>`;
+        tooltipContent += `已變回葉子: ${elapsedMins} 分鐘前<br>重置倒數: ${minsLeft} 分鐘</div>`;
       } else {
         tooltipContent += `<span class="text-slate-500">🍃 葉子狀態</span></div>`;
       }
@@ -1782,6 +1818,7 @@ export default function App() {
                       <option value="ribbon">🎀 僅顯示飄帶中</option>
                       <option value="blooming_only">🌸 僅顯示一般開花</option>
                       <option value="dying_only">⚠️ 僅顯示快枯歸葉</option>
+                      <option value="pending_report">⏳ 僅顯示等待回報中</option>
                       <option value="leaf">🍃 僅顯示葉子</option>
                       <option value="cluster">👑 僅顯示精選 (最少5花點)</option>
                     </select>
@@ -1872,6 +1909,20 @@ export default function App() {
                                 </div>
                               );
                             }
+                          } else if (item.statusKey === 'pending_report') {
+                            statusBadge = (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black bg-orange-500/10 text-orange-400 border border-orange-500/30 animate-pulse">
+                                <span className="w-1.5 h-1.5 rounded-full bg-orange-500"></span>
+                                ⏳ 等待回報中
+                              </span>
+                            );
+                            const elapsedMins = Math.floor((now - new Date(item.expire!).getTime()) / 60000);
+                            const minsLeft = Math.max(0, 20 - elapsedMins);
+                            countdownLabel = (
+                              <span className="text-orange-400 text-xs font-bold animate-pulse">
+                                已變葉 {elapsedMins} 分 (餘 {minsLeft} 分)
+                              </span>
+                            );
                           } else {
                             statusBadge = (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-800/60 text-slate-400 border border-slate-700/40">
@@ -1991,6 +2042,19 @@ export default function App() {
                           </span>
                         );
                       }
+                    } else if (item.statusKey === 'pending_report') {
+                      statusBadge = (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-orange-500/10 text-orange-400 border border-orange-500/30 animate-pulse">
+                          ⏳ 等待回報中
+                        </span>
+                      );
+                      const elapsedMins = Math.floor((now - new Date(item.expire!).getTime()) / 60000);
+                      const minsLeft = Math.max(0, 20 - elapsedMins);
+                      countdownLabel = (
+                        <span className="text-orange-400 text-[10px] font-bold animate-pulse">
+                          已變葉 {elapsedMins} 分 (餘 {minsLeft} 分)
+                        </span>
+                      );
                     } else {
                       statusBadge = (
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-800/60 text-slate-400 border border-slate-700/40">
