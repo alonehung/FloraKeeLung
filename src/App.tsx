@@ -1414,8 +1414,10 @@ export default function App() {
       routes.push(calculateRouteDetails(unassigned));
     }
 
-    // Sort routes by recommended startTime (earliest first)
-    return routes.sort((a, b) => a.startTimeMs - b.startTimeMs);
+    // Sort routes by recommended startTime (earliest first) and exclude those with no matching time
+    return routes
+      .filter(r => r.recommendedStartTime !== "無符合時間的路線")
+      .sort((a, b) => a.startTimeMs - b.startTimeMs);
   };
 
   const getMultipleForceBloomRoutes = () => {
