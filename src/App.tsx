@@ -168,6 +168,54 @@ const getDistance = (lat1: number, lng1: number, lat2: number, lng2: number): nu
   return R * c; // in meters
 };
 
+// Helper to get the leaf window of a flower in Taiwan's high-density context (leaves last 15 mins max before being planted)
+const getLeafWindow = (flower: { expire?: string | null }, currentTimeMs: number) => {
+  const expireTime = flower.expire ? new Date(flower.expire).getTime() : 0;
+  if (expireTime > currentTimeMs) {
+    // Currently blooming, will expire and become a leaf at expireTime
+    return {
+      start: expireTime,
+      end: expireTime + 15 * 60 * 1000
+    };
+  } else {
+    // Currently a leaf
+    return {
+      start: currentTimeMs,
+      end: currentTimeMs + 15 * 60 * 1000
+    };
+  }
+};
+
+// Helper to calculate earliest time at which at least 5 flowers in a circle are leaf simultaneously
+const getEarliestForceBloomTimeForCircle = (circleFlowers: any[], currentTimeMs: number) => {
+  if (circleFlowers.length < 5) return Infinity;
+
+  const starts = circleFlowers.map(f => {
+    const expireTime = f.expire ? new Date(f.expire).getTime() : 0;
+    return expireTime > currentTimeMs ? expireTime : currentTimeMs;
+  }).sort((a, b) => a - b);
+
+  let bestTime = Infinity;
+
+  for (let i = 0; i <= starts.length - 5; i++) {
+    const groupStarts = starts.slice(i, i + 5);
+    const minStart = groupStarts[0];
+    const maxStart = groupStarts[4];
+
+    if (maxStart - minStart <= 15 * 60 * 1000) {
+      const earliestT = Math.max(currentTimeMs, maxStart);
+      const minEnd = minStart + 15 * 60 * 1000;
+      if (earliestT <= minEnd) {
+        if (earliestT < bestTime) {
+          bestTime = earliestT;
+        }
+      }
+    }
+  }
+
+  return bestTime;
+};
+
 export default function App() {
   const [landmarks, setLandmarks] = useState<Landmark[]>([]);
   // User login/identity state
@@ -860,10 +908,14 @@ export default function App() {
   if (userRole === "planting") {
     // Planting mode: find the earliest starting time S for sequentially planting at least 5 flowers.
     // Include all region points, treating leaves as expired at `now`.
-    const allRegionPointsWithTime = regionPoints.map(l => ({
-      ...l,
-      expireTime: l.expire ? new Date(l.expire).getTime() : now
-    })).sort((a, b) => a.expireTime - b.expireTime);
+    const allRegionPointsWithTime = regionPoints.map(l => {
+      const window = getLeafWindow(l, now);
+      return {
+        ...l,
+        windowStart: window.start,
+        windowEnd: window.end
+      };
+    }).sort((a, b) => a.windowStart - b.windowStart);
 
     if (allRegionPointsWithTime.length < 5) {
       recommendedPlantingTime = "本區花點不足 5 朵";
@@ -882,15 +934,16 @@ export default function App() {
         };
         generatePerms([], [0, 1, 2, 3, 4]);
 
-        let minSStart = Infinity;
+        let bestSStartForGroup = Infinity;
         const speedMps = (plantingSpeed * 1000) / 3600;
 
         for (const perm of perms) {
-          let currentSRequired = -Infinity;
+          let currentSMin = -Infinity;
+          let currentSMax = Infinity;
           let accumulatedTravelTime = 0;
+
           for (let j = 0; j < 5; j++) {
             const currFlower = flowers[perm[j]];
-            const expireTime = currFlower.expireTime;
             
             if (j > 0) {
               const prevFlower = flowers[perm[j - 1]];
@@ -900,18 +953,27 @@ export default function App() {
             
             const plantingDelaySec = j * 6 * 60; // 6 mins per flower in seconds
             const delayMs = (plantingDelaySec + accumulatedTravelTime) * 1000;
-            const sRequiredForThisFlower = expireTime - delayMs;
-            if (sRequiredForThisFlower > currentSRequired) {
-              currentSRequired = sRequiredForThisFlower;
+            
+            const sMinForThis = currFlower.windowStart - delayMs;
+            const sMaxForThis = currFlower.windowEnd - delayMs;
+
+            if (sMinForThis > currentSMin) {
+              currentSMin = sMinForThis;
+            }
+            if (sMaxForThis < currentSMax) {
+              currentSMax = sMaxForThis;
             }
           }
 
-          if (currentSRequired < minSStart) {
-            minSStart = currentSRequired;
+          const earliestValidS = Math.max(now, currentSMin);
+          if (earliestValidS <= currentSMax) {
+            if (earliestValidS < bestSStartForGroup) {
+              bestSStartForGroup = earliestValidS;
+            }
           }
         }
 
-        return minSStart;
+        return bestSStartForGroup;
       };
 
       let bestStartTime = Infinity;
@@ -930,12 +992,15 @@ export default function App() {
       // Populate clusterIds with the best group's IDs
       bestGroup.forEach(f => clusterIds.add(f.id));
 
-      if (bestStartTime <= now) {
+      if (bestStartTime === Infinity) {
+        recommendedPlantingTime = "無符合時間的5花點路線";
+      } else if (bestStartTime <= now) {
         recommendedPlantingTime = "可立即出發 (滿足5花點)";
       } else {
         const dateObj = new Date(bestStartTime);
+        const dateStr = `${(dateObj.getMonth() + 1).toString().padStart(2, '0')}/${dateObj.getDate().toString().padStart(2, '0')}`;
         const timeStr = `${dateObj.getHours().toString().padStart(2, '0')}:${dateObj.getMinutes().toString().padStart(2, '0')}`;
-        recommendedPlantingTime = `${timeStr} (5花點同種最佳時間)`;
+        recommendedPlantingTime = `${dateStr} ${timeStr} (5花點同種最佳時間)`;
       }
     }
   } else if (userRole === "force_bloom") {
@@ -947,27 +1012,10 @@ export default function App() {
       // Find all region points within 500m of seed
       const nearby = regionPoints.filter(t => getDistance(seed.lat, seed.lng, t.lat, t.lng) <= 500);
       if (nearby.length >= 5) {
-        // Count how many are currently leaves
-        const currentLeaves = nearby.filter(f => !f.expire || new Date(f.expire).getTime() <= now).length;
-        if (currentLeaves >= 5) {
-          bestForceBloomTime = now;
+        const earliestForThis = getEarliestForceBloomTimeForCircle(nearby, now);
+        if (earliestForThis < bestForceBloomTime) {
+          bestForceBloomTime = earliestForThis;
           bestCircleFlowers = nearby;
-          break; // Immediate is best, we can stop searching
-        } else {
-          // Sort blooming flowers in this circle by expire time
-          const blooming = nearby
-            .filter(f => f.expire && new Date(f.expire).getTime() > now)
-            .map(f => ({ ...f, expireTime: new Date(f.expire!).getTime() }))
-            .sort((a, b) => a.expireTime - b.expireTime);
-
-          const needed = 5 - currentLeaves;
-          if (needed <= blooming.length) {
-            const earliestTimeForThisCircle = blooming[needed - 1].expireTime;
-            if (earliestTimeForThisCircle < bestForceBloomTime) {
-              bestForceBloomTime = earliestTimeForThisCircle;
-              bestCircleFlowers = nearby;
-            }
-          }
         }
       }
     }
@@ -981,8 +1029,9 @@ export default function App() {
       recommendedPlantingTime = "可立即強開 (滿足5花點)";
     } else {
       const dateObj = new Date(bestForceBloomTime);
+      const dateStr = `${(dateObj.getMonth() + 1).toString().padStart(2, '0')}/${dateObj.getDate().toString().padStart(2, '0')}`;
       const timeStr = `${dateObj.getHours().toString().padStart(2, '0')}:${dateObj.getMinutes().toString().padStart(2, '0')}`;
-      recommendedPlantingTime = `${timeStr} (駐點滿5花時間)`;
+      recommendedPlantingTime = `${dateStr} ${timeStr} (駐點滿5花時間)`;
     }
   }
 
@@ -1088,14 +1137,13 @@ export default function App() {
       const totalPlantingTime = path.length * 6 * 60; // 6 mins per flower in seconds
       const totalDuration = totalTravelTime + totalPlantingTime;
 
-      // Calculate recommendedStartTime:
-      // S_max = min_j (expireTime_j - j * 6m - travelTime_j)
-      let minSStart = Infinity;
+      let currentSMin = -Infinity;
+      let currentSMax = Infinity;
       let accumulatedTravelTime = 0;
 
       for (let j = 0; j < path.length; j++) {
         const currFlower = path[j];
-        const expireTime = currFlower.expire ? new Date(currFlower.expire).getTime() : Infinity;
+        const window = getLeafWindow(currFlower, now);
         
         if (j > 0) {
           const prevFlower = path[j - 1];
@@ -1106,23 +1154,28 @@ export default function App() {
         const plantingDelaySec = j * 6 * 60; // 6 mins per flower in seconds
         const delayMs = (plantingDelaySec + accumulatedTravelTime) * 1000;
         
-        if (expireTime !== Infinity) {
-          const sRequiredForThisFlower = expireTime - delayMs;
-          if (sRequiredForThisFlower < minSStart) {
-            minSStart = sRequiredForThisFlower;
-          }
+        const sMinForThis = window.start - delayMs;
+        const sMaxForThis = window.end - delayMs;
+
+        if (sMinForThis > currentSMin) {
+          currentSMin = sMinForThis;
+        }
+        if (sMaxForThis < currentSMax) {
+          currentSMax = sMaxForThis;
         }
       }
 
-      let recommendedStartTime = "可立即出發";
-      let startTimeMs = now;
-      if (minSStart !== Infinity) {
-        if (minSStart <= now) {
+      let recommendedStartTime = "無符合時間的路線";
+      let startTimeMs = Infinity;
+      const earliestValidS = Math.max(now, currentSMin);
+      if (earliestValidS <= currentSMax) {
+        startTimeMs = earliestValidS;
+        if (earliestValidS <= now) {
           recommendedStartTime = "可立即出發";
         } else {
-          startTimeMs = minSStart;
-          const dateObj = new Date(minSStart);
-          recommendedStartTime = `${dateObj.getHours().toString().padStart(2, '0')}:${dateObj.getMinutes().toString().padStart(2, '0')} 出發`;
+          const dateObj = new Date(earliestValidS);
+          const dateStr = `${(dateObj.getMonth() + 1).toString().padStart(2, '0')}/${dateObj.getDate().toString().padStart(2, '0')}`;
+          recommendedStartTime = `${dateStr} ${dateObj.getHours().toString().padStart(2, '0')}:${dateObj.getMinutes().toString().padStart(2, '0')} 出發`;
         }
       }
 
@@ -1276,30 +1329,7 @@ export default function App() {
             if (d > maxDist) maxDist = d;
           });
 
-          // Calculate suggested starting time for this centroid:
-          // Earliest time when this 500m circle has at least 5 leaves.
-          // Leaf flowers are available immediately (expireTime = now).
-          // Blooming flowers are available after expireTime.
-          const circleFlowersWithTime = coveredByCentroid.map(f => ({
-            ...f,
-            expireTime: f.expire ? new Date(f.expire).getTime() : now
-          })).sort((a, b) => a.expireTime - b.expireTime);
-
-          let bestForceBloomTime = now;
-          if (circleFlowersWithTime.length >= 5) {
-            // Check if we already have 5 leaves (expireTime <= now)
-            const currentLeavesCount = circleFlowersWithTime.filter(f => f.expireTime <= now).length;
-            if (currentLeavesCount < 5) {
-              const needed = 5 - currentLeavesCount;
-              const blooming = circleFlowersWithTime.filter(f => f.expireTime > now);
-              if (needed <= blooming.length) {
-                bestForceBloomTime = blooming[needed - 1].expireTime;
-              }
-            }
-          } else {
-            // Circle has fewer than 5 flowers total
-            bestForceBloomTime = Infinity;
-          }
+          const bestForceBloomTime = getEarliestForceBloomTimeForCircle(coveredByCentroid, now);
 
           let recommendedStartTime = "無符合 5 花點之駐點";
           if (bestForceBloomTime !== Infinity) {
@@ -1307,7 +1337,8 @@ export default function App() {
               recommendedStartTime = "可立即強開";
             } else {
               const dateObj = new Date(bestForceBloomTime);
-              recommendedStartTime = `${dateObj.getHours().toString().padStart(2, '0')}:${dateObj.getMinutes().toString().padStart(2, '0')} 強開`;
+              const dateStr = `${(dateObj.getMonth() + 1).toString().padStart(2, '0')}/${dateObj.getDate().toString().padStart(2, '0')}`;
+              recommendedStartTime = `${dateStr} ${dateObj.getHours().toString().padStart(2, '0')}:${dateObj.getMinutes().toString().padStart(2, '0')} 強開`;
             }
           }
 
@@ -2428,13 +2459,6 @@ export default function App() {
               </div>
               <div className="h-4 w-px bg-slate-800" />
               <button
-                onClick={handleExportSelectedRoute}
-                className="bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 text-slate-950 font-black px-2.5 py-1 rounded-xl transition active:scale-95 flex items-center gap-1 text-[10px] sm:text-[11px]"
-              >
-                👑 導航精選
-              </button>
-              <div className="h-4 w-px bg-slate-800" />
-              <button
                 onClick={() => {
                   setSelectedSuggestedSpot(null);
                   setShowNavModal(true);
@@ -2442,7 +2466,7 @@ export default function App() {
                 }}
                 className="bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white font-extrabold px-3 py-1 rounded-xl transition active:scale-95 flex items-center gap-1.5 text-[10px] sm:text-[11px] shadow-md border border-pink-400/20"
               >
-                <i className="fa-solid fa-compass"></i> 路線/駐點規劃
+                <i className="fa-solid fa-compass"></i> 路線/強開駐點規劃
               </button>
             </div>
           </div>
