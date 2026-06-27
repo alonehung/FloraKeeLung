@@ -986,7 +986,7 @@ export default function App() {
     } else if (item.expire) {
       const expTime = new Date(item.expire).getTime();
       const elapsedMs = now - expTime;
-      if (elapsedMs >= 0 && elapsedMs <= 20 * 60 * 1000) {
+      if (elapsedMs >= 0 && elapsedMs <= 15 * 60 * 1000) {
         statusKey = 'pending_report';
       }
     }
@@ -1108,7 +1108,7 @@ export default function App() {
         `;
       } else if (item.statusKey === 'pending_report') {
         const elapsedMins = Math.floor((now - new Date(item.expire!).getTime()) / 60000);
-        const minsLeft = Math.max(0, 20 - elapsedMins);
+        const minsLeft = Math.max(0, 15 - elapsedMins);
 
         markerHtml = `
           <div class="flex flex-col items-center justify-center">
@@ -1161,7 +1161,7 @@ export default function App() {
         tooltipContent += `剩餘時間: ${h}h ${m}m ${s}s<br>枯萎時間: ${formatDateLabel(item.expire)}</div>`;
       } else if (item.statusKey === 'pending_report') {
         const elapsedMins = Math.floor((now - new Date(item.expire!).getTime()) / 60000);
-        const minsLeft = Math.max(0, 20 - elapsedMins);
+        const minsLeft = Math.max(0, 15 - elapsedMins);
         tooltipContent += `<span class="text-orange-600 font-black">⏳ 等待回報中</span><br>`;
         tooltipContent += `已變回葉子: ${elapsedMins} 分鐘前<br>重置倒數: ${minsLeft} 分鐘</div>`;
       } else {
@@ -1917,7 +1917,7 @@ export default function App() {
                               </span>
                             );
                             const elapsedMins = Math.floor((now - new Date(item.expire!).getTime()) / 60000);
-                            const minsLeft = Math.max(0, 20 - elapsedMins);
+                            const minsLeft = Math.max(0, 15 - elapsedMins);
                             countdownLabel = (
                               <span className="text-orange-400 text-xs font-bold animate-pulse">
                                 已變葉 {elapsedMins} 分 (餘 {minsLeft} 分)
@@ -2049,7 +2049,7 @@ export default function App() {
                         </span>
                       );
                       const elapsedMins = Math.floor((now - new Date(item.expire!).getTime()) / 60000);
-                      const minsLeft = Math.max(0, 20 - elapsedMins);
+                      const minsLeft = Math.max(0, 15 - elapsedMins);
                       countdownLabel = (
                         <span className="text-orange-400 text-[10px] font-bold animate-pulse">
                           已變葉 {elapsedMins} 分 (餘 {minsLeft} 分)
