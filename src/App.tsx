@@ -166,9 +166,6 @@ export default function App() {
     const saved = localStorage.getItem("user_role");
     return (saved === "planting" || saved === "force_bloom") ? saved : null;
   });
-  const [userNickname, setUserNickname] = useState<string>(() => {
-    return localStorage.getItem("user_nickname") || "";
-  });
   const [activeRegion] = useState("keelung");
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -315,13 +312,19 @@ export default function App() {
         mapRef.current = mapObj;
         isMapInitialized.current = true;
 
-        if (landmarks.length > 0) {
-          const regionLandmarks = landmarks.filter(l => l.region === "keelung");
-          if (regionLandmarks.length > 0) {
-            const avgLat = regionLandmarks.reduce((acc, cur) => acc + cur.lat, 0) / regionLandmarks.length;
-            const avgLng = regionLandmarks.reduce((acc, cur) => acc + cur.lng, 0) / regionLandmarks.length;
-            mapObj.setView([avgLat, avgLng], 14);
-          }
+        // One-time centering on initial landmarks if available
+        const stored = localStorage.getItem(`${LOCAL_STORAGE_KEY_PREFIX}_master_list`);
+        let mapCenterPoints = PRESETS.keelung;
+        if (stored) {
+          try {
+            mapCenterPoints = JSON.parse(stored);
+          } catch (e) {}
+        }
+        const regionLandmarks = mapCenterPoints.filter(l => l.region === "keelung");
+        if (regionLandmarks.length > 0) {
+          const avgLat = regionLandmarks.reduce((acc, cur) => acc + cur.lat, 0) / regionLandmarks.length;
+          const avgLng = regionLandmarks.reduce((acc, cur) => acc + cur.lng, 0) / regionLandmarks.length;
+          mapObj.setView([avgLat, avgLng], 14);
         }
       } catch (err) {
         console.error("Failed to initialize Leaflet Map:", err);
@@ -329,13 +332,17 @@ export default function App() {
     }
 
     return () => {
-      if (!userRole && mapRef.current) {
-        mapRef.current.remove();
+      if (mapRef.current) {
+        try {
+          mapRef.current.remove();
+        } catch (err) {
+          console.error("Failed to remove map:", err);
+        }
         mapRef.current = null;
         isMapInitialized.current = false;
       }
     };
-  }, [userRole, landmarks]);
+  }, [userRole]);
 
   // Recalculate Leaflet map layout sizes when layout toggles between Simple and Editor
   useEffect(() => {
