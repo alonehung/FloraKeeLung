@@ -1407,6 +1407,24 @@ export default function App() {
     showToast("🗑️ 已成功刪除該花卉標記點位");
   };
 
+  const handleCoordinateInput = (val: string, setLat: (v: string) => void, setLng: (v: string) => void) => {
+    if (val.includes(",")) {
+      const cleaned = val.replace(/[()\[\]\s]/g, "");
+      const parts = cleaned.split(",");
+      if (parts.length === 2) {
+        const latVal = parseFloat(parts[0]);
+        const lngVal = parseFloat(parts[1]);
+        if (!isNaN(latVal) && !isNaN(lngVal)) {
+          setLat(parts[0]);
+          setLng(parts[1]);
+          showToast("✨ 已自動解析並拆分 Google Maps 經緯度座標！");
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+
   const handleAddPoint = async () => {
     if (!addName.trim() || !addLat.trim() || !addLng.trim()) {
       showToast("❌ 請填寫完整名稱、緯度與經度！");
@@ -2371,24 +2389,38 @@ export default function App() {
                 <div>
                   <label className="text-slate-400 block mb-1">緯度 (Lat)</label>
                   <input 
-                    type="number" 
-                    step="0.000001" 
+                    type="text" 
                     value={editLat} 
-                    onChange={(e) => setEditLat(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (!handleCoordinateInput(val, setEditLat, setEditLng)) {
+                        setEditLat(val);
+                      }
+                    }}
+                    placeholder="例如: 25.132"
                     className="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500"
                   />
                 </div>
                 <div>
                   <label className="text-slate-400 block mb-1">經度 (Lng)</label>
                   <input 
-                    type="number" 
-                    step="0.000001" 
+                    type="text" 
                     value={editLng} 
-                    onChange={(e) => setEditLng(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (!handleCoordinateInput(val, setEditLat, setEditLng)) {
+                        setEditLng(val);
+                      }
+                    }}
+                    placeholder="例如: 121.745"
                     className="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500"
                   />
                 </div>
               </div>
+              <p className="text-[10px] text-slate-400 leading-relaxed bg-slate-950/40 p-2 rounded-lg border border-slate-800/60 mt-1">
+                💡 <strong>座標速貼：</strong> 支援直接在上面任一格貼入 Google Maps 複製的座標，例如：<br />
+                <code className="text-pink-400">(25.1285850, 121.7456590)</code> 或 <code className="text-pink-400">25.1285850, 121.7456590</code> 系統會自動拆分！
+              </p>
               <div>
                 <label className="text-slate-400 block mb-1">設定開花終止時間</label>
                 <input 
@@ -2440,26 +2472,38 @@ export default function App() {
                 <div>
                   <label className="text-slate-400 block mb-1">緯度 (Lat)</label>
                   <input 
-                    type="number" 
-                    step="0.000001" 
+                    type="text" 
                     value={addLat} 
-                    onChange={(e) => setAddLat(e.target.value)}
-                    placeholder="25.132"
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (!handleCoordinateInput(val, setAddLat, setAddLng)) {
+                        setAddLat(val);
+                      }
+                    }}
+                    placeholder="例如: 25.132"
                     className="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500"
                   />
                 </div>
                 <div>
                   <label className="text-slate-400 block mb-1">經度 (Lng)</label>
                   <input 
-                    type="number" 
-                    step="0.000001" 
+                    type="text" 
                     value={addLng} 
-                    onChange={(e) => setAddLng(e.target.value)}
-                    placeholder="121.745"
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (!handleCoordinateInput(val, setAddLat, setAddLng)) {
+                        setAddLng(val);
+                      }
+                    }}
+                    placeholder="例如: 121.745"
                     className="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500"
                   />
                 </div>
               </div>
+              <p className="text-[10px] text-slate-400 leading-relaxed bg-slate-950/40 p-2 rounded-lg border border-slate-800/60 mt-1">
+                💡 <strong>座標速貼：</strong> 支援直接在上面任一格貼入 Google Maps 複製的座標，例如：<br />
+                <code className="text-pink-400">(25.1285850, 121.7456590)</code> 或 <code className="text-pink-400">25.1285850, 121.7456590</code> 系統會自動拆分！
+              </p>
               <div>
                 <label className="text-slate-400 block mb-1">開花終止時間 (選填，不填為葉子)</label>
                 <input 
