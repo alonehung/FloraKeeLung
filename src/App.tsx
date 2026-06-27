@@ -187,7 +187,8 @@ const getLeafWindow = (flower: { expire?: string | null }, currentTimeMs: number
 };
 
 // Helper to get the harvest window of a flower for freeloader (white-pying) mode
-// The window corresponds to when the flower is either in its leaf state or in its ribbon (first hour of blooming) state.
+// The window corresponds strictly to when the flower is in its ribbon state (first hour of blooming).
+// Per user's rule: ribbon state is estimated to be 15 to 60 minutes after turning into a leaf.
 const getHarvestWindow = (flower: { expire?: string | null }, currentTimeMs: number) => {
   const expireTime = flower.expire ? new Date(flower.expire).getTime() : 0;
   if (expireTime > currentTimeMs) {
@@ -201,20 +202,19 @@ const getHarvestWindow = (flower: { expire?: string | null }, currentTimeMs: num
       };
     } else {
       // Ribbon is expired. It will become a leaf at expireTime.
-      // Leaf state lasts for 30 mins, and will be planted/bloomed within 15 mins, staying in ribbon for another 1 hour.
-      // Thus, the combined next leaf & ribbon window is from expireTime to expireTime + 75 mins.
+      // Next ribbon window is estimated to be 15 to 60 minutes after it becomes a leaf (at expireTime).
       return {
-        start: expireTime,
-        end: expireTime + 75 * 60 * 1000
+        start: expireTime + 15 * 60 * 1000,
+        end: expireTime + 60 * 60 * 1000
       };
     }
   } else {
     // Currently a leaf
-    // It is currently a leaf, and will be planted/bloomed by others within 15 mins, then staying in ribbon for 1 hour.
-    // Thus, the leaf & ribbon window is from now (currentTimeMs) to now + 75 mins.
+    // It will be planted/bloomed by others within 15 mins, staying in ribbon for another 45 mins.
+    // Thus, the ribbon window is estimated to be 15 to 60 mins from now (currentTimeMs).
     return {
-      start: currentTimeMs,
-      end: currentTimeMs + 75 * 60 * 1000
+      start: currentTimeMs + 15 * 60 * 1000,
+      end: currentTimeMs + 60 * 60 * 1000
     };
   }
 };
@@ -1035,18 +1035,18 @@ export default function App() {
 
       if (bestStartTime === Infinity) {
         recommendedPlantingTime = userRole === "freeloader" 
-          ? "無符合(或總時間超45分)之5花白嫖路線" 
+          ? "無符合(或總時間超45分)之5花伸手黨路線" 
           : "無符合(或總時間超90分)之5花點路線";
       } else if (bestStartTime <= now) {
         recommendedPlantingTime = userRole === "freeloader"
-          ? "可立即出發 (滿足白嫖條件)"
+          ? "可立即出發 (滿足伸手黨條件)"
           : "可立即出發 (滿足5花點)";
       } else {
         const dateObj = new Date(bestStartTime);
         const dateStr = `${(dateObj.getMonth() + 1).toString().padStart(2, '0')}/${dateObj.getDate().toString().padStart(2, '0')}`;
         const timeStr = `${dateObj.getHours().toString().padStart(2, '0')}:${dateObj.getMinutes().toString().padStart(2, '0')}`;
         recommendedPlantingTime = userRole === "freeloader"
-          ? `${dateStr} ${timeStr} (5花白嫖最佳時間)`
+          ? `${dateStr} ${timeStr} (5花伸手黨最佳時間)`
           : `${dateStr} ${timeStr} (5花點同種最佳時間)`;
       }
     }
@@ -1910,7 +1910,7 @@ export default function App() {
             <strong style="color: ${colorInfo.hex}">🚗 路線 ${rIdx + 1} (${colorInfo.name})</strong><br/>
             建議：<strong>${route.recommendedStartTime}</strong><br/>
             花數：${route.path.length} 朵<br/>
-            時長：${Math.floor(route.totalDuration / 60)} 分 ${Math.round(route.totalDuration % 60)} 秒 (${userRole === "freeloader" ? "伸手黨白嫖" : "種花"})
+            時長：${Math.floor(route.totalDuration / 60)} 分 ${Math.round(route.totalDuration % 60)} 秒 (${userRole === "freeloader" ? "伸手黨收割" : "種花"})
           </div>
         `);
 
@@ -2521,9 +2521,9 @@ export default function App() {
                   <div className="flex items-center gap-3">
                     <span className="text-2xl">👑💎</span>
                     <div className="flex-1">
-                      <h3 className="font-bold text-xs text-amber-400">伸手黨白嫖收割</h3>
+                      <h3 className="font-bold text-xs text-amber-400">伸手黨直接收割</h3>
                       <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
-                        不需辛勤種植！預估市區葉子最快 <strong className="text-white">15 分鐘內</strong> 會被他人種開，精算最省力之 5+ 朵大花白嫖路線！
+                        不需辛勤種植！預估市區葉子最快 <strong className="text-white">15 分鐘內</strong> 會被他人種開，精算最省力之 5+ 朵大花伸手黨路線！
                       </p>
                     </div>
                   </div>
@@ -2624,7 +2624,7 @@ export default function App() {
               <div className="flex items-center gap-1.5 text-pink-400 font-bold">
                 <span className="flex items-center gap-1">
                   <i className={userRole === "planting" ? "fa-solid fa-seedling text-emerald-400" : userRole === "force_bloom" ? "fa-solid fa-circle-dot text-purple-400" : "fa-solid fa-crown text-amber-400"}></i> 
-                  {userRole === "planting" ? "建議種花時間：" : userRole === "force_bloom" ? "建議強開時間：" : "建議白嫖時間："}
+                  {userRole === "planting" ? "建議種花時間：" : userRole === "force_bloom" ? "建議強開時間：" : "建議伸手黨時間："}
                 </span>
                 <span className="text-white font-black bg-purple-950 px-2 py-0.5 rounded-lg border border-purple-500/30">
                   {recommendedPlantingTime}
@@ -2653,7 +2653,7 @@ export default function App() {
             {userRole && (
               <div className="flex items-center gap-2 bg-slate-950/80 rounded-2xl p-2 border border-purple-500/30 text-xs">
                 <span className="text-pink-400 font-bold flex items-center gap-1">
-                  {userRole === "planting" ? "🚶‍♂️ 走路/騎車種花" : userRole === "force_bloom" ? "🎯 雷達強開花" : "👑 伸手黨白嫖收割"}
+                  {userRole === "planting" ? "🚶‍♂️ 走路/騎車種花" : userRole === "force_bloom" ? "🎯 雷達強開花" : "👑 伸手黨直接收割"}
                 </span>
                 <button
                   onClick={() => {
@@ -3567,7 +3567,7 @@ export default function App() {
                     : "border-transparent text-slate-400 hover:text-slate-300"
                 }`}
               >
-                👑 伸手黨白嫖
+                👑 伸手黨收割
               </button>
             </div>
 
@@ -3673,7 +3673,8 @@ export default function App() {
                                     const hNum = step.landmark.id;
                                     const name = step.landmark.name;
                                     const landmark = step.landmark;
-                                    const leafTime = landmark.expire ? new Date(landmark.expire).getTime() : now;
+                                    const isBlooming = landmark.expire ? new Date(landmark.expire).getTime() > now : false;
+                                    const leafTime = isBlooming ? new Date(landmark.expire!).getTime() : now;
                                     const ribbonStart = leafTime + 15 * 60 * 1000;
                                     const ribbonEnd = leafTime + 60 * 60 * 1000;
                                     const formatTimeFromMs = (ms: number) => {
@@ -3766,7 +3767,7 @@ export default function App() {
                           : "bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-900"
                       }`}
                     >
-                      🚶‍♂️ 走路白嫖 (5 km/h)
+                      🚶‍♂️ 走路收割 (5 km/h)
                     </button>
                     <button
                       onClick={() => setPlantingSpeed(15)}
@@ -3787,7 +3788,7 @@ export default function App() {
                   if (routes.length === 0) {
                     return (
                       <div className="py-6 text-center text-xs text-slate-500 bg-slate-950/40 rounded-2xl border border-slate-800">
-                        ⚠️ 當前無可規劃的白嫖花卉點位！(最少需要 5 朵花)
+                        ⚠️ 當前無可規劃的伸手黨花卉點位！(最少需要 5 朵花)
                       </div>
                     );
                   }
@@ -3795,7 +3796,7 @@ export default function App() {
                   return (
                     <div className="space-y-4">
                       <p className="text-[10px] text-slate-400 leading-relaxed bg-slate-950/40 p-2.5 rounded-xl border border-slate-800">
-                        💡 <strong>連續白嫖原理：</strong> 系統已自動將當前花卉點位以最少 5 朵大花白嫖（不需自己停留 6 分鐘種植，順路前往）為基準分組，推薦最優白嫖出發時間。點選卡片可於地圖高亮路線！
+                        💡 <strong>連續收割原理：</strong> 系統已自動將當前花卉點位以最少 5 朵大花直接收割（不需自己停留 6 分鐘種植，順路前往）為基準分組，推薦最優直接收割出發時間。點選卡片可於地圖高亮路線！
                       </p>
 
                       <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
@@ -3824,11 +3825,11 @@ export default function App() {
                                 <div className="flex items-center gap-2">
                                   <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: colorInfo.hex }} />
                                   <span className="text-xs font-black text-slate-100">
-                                    白嫖路線 {rIdx + 1} ({colorInfo.name})
+                                    直接收割路線 {rIdx + 1} ({colorInfo.name})
                                   </span>
                                 </div>
                                 <span className="text-[11px] font-extrabold text-amber-400">
-                                  👑 {route.path.length} 朵大花白嫖
+                                  👑 {route.path.length} 朵大花直接收割
                                 </span>
                               </div>
 
@@ -3854,7 +3855,8 @@ export default function App() {
                                     const hNum = step.landmark.id;
                                     const name = step.landmark.name;
                                     const landmark = step.landmark;
-                                    const leafTime = landmark.expire ? new Date(landmark.expire).getTime() : now;
+                                    const isBlooming = landmark.expire ? new Date(landmark.expire).getTime() > now : false;
+                                    const leafTime = isBlooming ? new Date(landmark.expire!).getTime() : now;
                                     const ribbonStart = leafTime + 15 * 60 * 1000;
                                     const ribbonEnd = leafTime + 60 * 60 * 1000;
                                     const formatTimeFromMs = (ms: number) => {
@@ -3867,7 +3869,7 @@ export default function App() {
                                         <div key={idx} className="flex items-start gap-1.5 py-1">
                                           <span className="bg-emerald-500/20 text-emerald-400 w-3.5 h-3.5 rounded-full flex items-center justify-center font-bold text-[8px] shrink-0 mt-0.5">起</span>
                                           <div className="flex flex-col">
-                                            <span className="font-bold text-slate-200">#{hNum} {name} (白嫖起點)</span>
+                                            <span className="font-bold text-slate-200">#{hNum} {name} (伸手起點)</span>
                                             <span className="text-[9px] text-cyan-400 font-medium mt-0.5">
                                               🎗️ 預估飄帶：{formatTimeFromMs(ribbonStart)} ~ {formatTimeFromMs(ribbonEnd)}
                                             </span>
@@ -3922,7 +3924,7 @@ export default function App() {
                                   style={{ backgroundColor: colorInfo.hex }}
                                 >
                                   <i className="fa-solid fa-map-location-dot"></i>
-                                  <span>開啟 {colorInfo.name} 路線 Google Maps 伸手黨白嫖導航</span>
+                                  <span>開啟 {colorInfo.name} 路線 Google Maps 伸手黨直接收割導航</span>
                                 </button>
                               </div>
                             </div>
