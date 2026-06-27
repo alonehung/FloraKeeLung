@@ -143,8 +143,32 @@ const fetchSheetViaJSONP = (sheetId: string): Promise<Landmark[]> => {
   });
 };
 
+// Haversine formula to compute distance between two GPS coordinates in meters
+const getDistance = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
+  const R = 6371e3; // Earth radius in meters
+  const phi1 = (lat1 * Math.PI) / 180;
+  const phi2 = (lat2 * Math.PI) / 180;
+  const deltaPhi = ((lat2 - lat1) * Math.PI) / 180;
+  const deltaLambda = ((lng2 - lng1) * Math.PI) / 180;
+
+  const a = Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
+            Math.cos(phi1) * Math.cos(phi2) *
+            Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c; // in meters
+};
+
 export default function App() {
   const [landmarks, setLandmarks] = useState<Landmark[]>([]);
+  // User login/identity state
+  const [userRole, setUserRole] = useState<"planting" | "force_bloom" | null>(() => {
+    const saved = localStorage.getItem("user_role");
+    return (saved === "planting" || saved === "force_bloom") ? saved : null;
+  });
+  const [userNickname, setUserNickname] = useState<string>(() => {
+    return localStorage.getItem("user_nickname") || "";
+  });
   const [activeRegion] = useState("keelung");
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -200,10 +224,30 @@ export default function App() {
 
   const [gpxText, setGpxText] = useState("");
 
+  // Planner & Route Customizations
+  const [navModalTab, setNavModalTab] = useState<"planting" | "force_bloom">("planting");
+  const [selectedRole, setSelectedRole] = useState<"planting" | "force_bloom" | null>(null);
+
+  const handleLoginSubmit = () => {
+    if (!selectedRole) return;
+    localStorage.setItem("user_role", selectedRole);
+    localStorage.setItem("user_nickname", userNickname);
+    setUserRole(selectedRole);
+    setNavModalTab(selectedRole);
+    showToast(`🌸 歡迎代號 [${userNickname || "無名英雄"}] 的特攻大師！`);
+    playSynthChime();
+  };
+  const [plantingSpeed, setPlantingSpeed] = useState<number>(5); // 5 km/h for walking, 15 km/h for riding
+  const [plantingTarget, setPlantingTarget] = useState<"leaf" | "all">("leaf");
+  const [forceBloomTarget, setForceBloomTarget] = useState<"leaf" | "all">("leaf");
+  const [selectedSuggestedSpot, setSelectedSuggestedSpot] = useState<{ lat: number; lng: number; coveredIds: number[] } | null>(null);
+
   // Refs for Leaflet Map
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const markersRef = useRef<Record<number, any>>({});
+  const suggestedSpotCircleRef = useRef<any>(null);
+  const suggestedSpotMarkerRef = useRef<any>(null);
   const isMapInitialized = useRef(false);
 
   // Synths (ToneJS)
@@ -865,6 +909,157 @@ export default function App() {
     playSynthChime();
   };
 
+  const getPlantingRouteData = () => {
+    // Filter target landmarks based on user selection ("leaf" or "all")
+    const targets = processedPoints.filter(p => {
+      if (p.region !== activeRegion) return false;
+      if (plantingTarget === "leaf") {
+        return !p.isBlooming; // only leaves
+      }
+      return true; // all
+    });
+
+    if (targets.length === 0) {
+      return {
+        path: [],
+        totalDistance: 0,
+        totalTravelTime: 0,
+        totalPlantingTime: 0,
+        totalDuration: 0,
+        steps: []
+      };
+    }
+
+    // Solve TSP with Nearest Neighbor
+    const path: typeof targets = [];
+    const remaining = [...targets];
+    
+    let curr = remaining[0];
+    path.push(curr);
+    remaining.splice(0, 1);
+
+    while (remaining.length > 0) {
+      let bestIdx = 0;
+      let bestDist = Infinity;
+      for (let i = 0; i < remaining.length; i++) {
+        const d = getDistance(curr.lat, curr.lng, remaining[i].lat, remaining[i].lng);
+        if (d < bestDist) {
+          bestDist = d;
+          bestIdx = i;
+        }
+      }
+      curr = remaining[bestIdx];
+      path.push(curr);
+      remaining.splice(bestIdx, 1);
+    }
+
+    // Compute distances and times based on plantingSpeed
+    const speedMps = (plantingSpeed * 1000) / 3600;
+    let totalDistance = 0;
+    const steps: {
+      type: "start" | "move";
+      landmark: typeof targets[0];
+      distance?: number;
+      travelTime?: number;
+    }[] = [];
+
+    steps.push({
+      type: "start",
+      landmark: path[0]
+    });
+
+    for (let i = 1; i < path.length; i++) {
+      const d = getDistance(path[i - 1].lat, path[i - 1].lng, path[i].lat, path[i].lng);
+      totalDistance += d;
+      const tTime = d / speedMps;
+      steps.push({
+        type: "move",
+        landmark: path[i],
+        distance: d,
+        travelTime: tTime
+      });
+    }
+
+    const totalTravelTime = totalDistance / speedMps;
+    const totalPlantingTime = path.length * 6 * 60; // 6 mins per flower in seconds
+    const totalDuration = totalTravelTime + totalPlantingTime;
+
+    return {
+      path,
+      totalDistance,
+      totalTravelTime,
+      totalPlantingTime,
+      totalDuration,
+      steps
+    };
+  };
+
+  const getSuggestedParkingSpots = () => {
+    // Filter target landmarks based on user selection ("leaf" or "all")
+    const targets = processedPoints.filter(p => {
+      if (p.region !== activeRegion) return false;
+      if (forceBloomTarget === "leaf") {
+        return !p.isBlooming; // only leaves
+      }
+      return true; // all
+    });
+
+    if (targets.length === 0) return [];
+
+    const spots: { lat: number; lng: number; coveredIds: number[]; coveredNames: string[]; maxDist: number }[] = [];
+    let uncovered = [...targets];
+
+    while (uncovered.length > 0 && spots.length < 10) {
+      let bestCandidate: { lat: number; lng: number; coveredIds: number[]; coveredNames: string[]; maxDist: number } | null = null;
+      let maxNewCoveredCount = 0;
+
+      for (const seed of targets) {
+        // Find all target points within 500m of seed
+        const nearby = targets.filter(t => getDistance(seed.lat, seed.lng, t.lat, t.lng) <= 500);
+        if (nearby.length === 0) continue;
+
+        // Calculate centroid of nearby points
+        const sumLat = nearby.reduce((acc, p) => acc + p.lat, 0);
+        const sumLng = nearby.reduce((acc, p) => acc + p.lng, 0);
+        const cLat = sumLat / nearby.length;
+        const cLng = sumLng / nearby.length;
+
+        // Verify which points from the whole list are actually within 500m of the centroid
+        const coveredByCentroid = targets.filter(t => getDistance(cLat, cLng, t.lat, t.lng) <= 500);
+        
+        // Calculate newly covered points in uncovered pool
+        const newlyCovered = coveredByCentroid.filter(t => uncovered.some(u => u.id === t.id));
+        
+        if (newlyCovered.length > maxNewCoveredCount) {
+          let maxDist = 0;
+          coveredByCentroid.forEach(t => {
+            const d = getDistance(cLat, cLng, t.lat, t.lng);
+            if (d > maxDist) maxDist = d;
+          });
+
+          maxNewCoveredCount = newlyCovered.length;
+          bestCandidate = {
+            lat: cLat,
+            lng: cLng,
+            coveredIds: coveredByCentroid.map(t => t.id),
+            coveredNames: coveredByCentroid.map(t => t.name),
+            maxDist
+          };
+        }
+      }
+
+      if (bestCandidate && maxNewCoveredCount > 0) {
+        spots.push(bestCandidate);
+        const coveredIdsSet = new Set(bestCandidate.coveredIds);
+        uncovered = uncovered.filter(u => !coveredIdsSet.has(u.id));
+      } else {
+        break;
+      }
+    }
+
+    return spots.sort((a, b) => b.coveredIds.length - a.coveredIds.length);
+  };
+
   const handleExportSelectedRoute = () => {
     // 1. Get all active cluster/featured points
     const activeClusterPoints = processedPoints.filter(p => p.region === activeRegion && p.isBlooming && p.isClusterMember);
@@ -1191,7 +1386,47 @@ export default function App() {
 
       markersRef.current[item.id] = marker;
     });
-  }, [landmarks, statusFilter, searchTerm]);
+
+    // Clean up previous suggested spot circle & marker
+    if (suggestedSpotCircleRef.current) {
+      mapRef.current.removeLayer(suggestedSpotCircleRef.current);
+      suggestedSpotCircleRef.current = null;
+    }
+    if (suggestedSpotMarkerRef.current) {
+      mapRef.current.removeLayer(suggestedSpotMarkerRef.current);
+      suggestedSpotMarkerRef.current = null;
+    }
+
+    if (selectedSuggestedSpot) {
+      // Draw 500m circle
+      suggestedSpotCircleRef.current = L.circle([selectedSuggestedSpot.lat, selectedSuggestedSpot.lng], {
+        radius: 500,
+        color: '#c084fc', // purple-400
+        fillColor: '#c084fc',
+        fillOpacity: 0.15,
+        dashArray: '6, 6',
+        weight: 2
+      }).addTo(mapRef.current);
+
+      // Draw custom center marker
+      const centerIcon = L.divIcon({
+        html: `
+          <div class="flex flex-col items-center justify-center">
+            <div class="w-8 h-8 rounded-full bg-purple-600 text-white flex items-center justify-center border-2 border-white shadow-xl animate-bounce">
+              🎯
+            </div>
+            <div class="bg-slate-950/95 text-purple-300 font-extrabold text-[9px] px-2 py-0.5 rounded-full border border-purple-500/50 mt-1 shadow-lg whitespace-nowrap">
+              最佳駐點 (強開 ${selectedSuggestedSpot.coveredIds.length} 花)
+            </div>
+          </div>
+        `,
+        className: 'custom-suggested-spot-icon',
+        iconSize: [40, 40],
+        iconAnchor: [20, 20]
+      });
+      suggestedSpotMarkerRef.current = L.marker([selectedSuggestedSpot.lat, selectedSuggestedSpot.lng], { icon: centerIcon }).addTo(mapRef.current);
+    }
+  }, [landmarks, statusFilter, searchTerm, selectedSuggestedSpot]);
 
   // Focus table row
   const highlightRowInTable = (id: number) => {
@@ -1641,6 +1876,128 @@ export default function App() {
   const totalBloomCount = processedPoints.filter(p => p.isBlooming).length;
   const totalLeafCount = processedPoints.filter(p => !p.isBlooming).length;
 
+  if (!userRole) {
+    return (
+      <div className="min-h-screen flex flex-col justify-center items-center bg-[#0b0f19] p-4 text-[#f1f5f9] relative overflow-hidden font-sans">
+        {/* Subtle glowing gradients in background */}
+        <div className="absolute top-1/4 left-1/4 w-72 h-72 bg-pink-500/10 rounded-full blur-3xl pointer-events-none"></div>
+        <div className="absolute bottom-1/4 right-1/4 w-72 h-72 bg-purple-500/10 rounded-full blur-3xl pointer-events-none"></div>
+
+        <div className="w-full max-w-md bg-slate-900/90 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl relative z-10 space-y-6">
+          <div className="text-center space-y-2">
+            <div className="inline-block bg-pink-500/10 p-4 rounded-3xl border border-pink-500/30 mb-2">
+              <span className="text-4xl">🌸</span>
+            </div>
+            <h1 className="text-2xl sm:text-3xl font-black tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-pink-400 via-purple-400 to-indigo-400">
+              花嶼雞籠 特攻戰區
+            </h1>
+            <p className="text-slate-400 text-xs tracking-wider font-bold">
+              基隆大花即時特攻導航與駐點精算系統
+            </p>
+          </div>
+
+          <div className="space-y-4">
+            {/* Nickname Input */}
+            <div className="space-y-1.5">
+              <label className="text-xs text-slate-400 font-bold block">👤 請輸入您的特攻代號 (選填)：</label>
+              <input
+                type="text"
+                placeholder="例如：暖暖種花達人、強開雷達手"
+                value={userNickname}
+                onChange={(e) => setUserNickname(e.target.value)}
+                className="w-full p-3 rounded-2xl bg-slate-950 border border-slate-800 text-slate-200 text-xs focus:outline-none focus:ring-1 focus:ring-pink-500 placeholder-slate-600 transition"
+              />
+            </div>
+
+            {/* Role Selection Label */}
+            <div className="space-y-2">
+              <label className="text-xs text-slate-400 font-bold block">🧭 請選擇您今日的特攻任務身分：</label>
+              
+              <div className="grid grid-cols-1 gap-3">
+                {/* Option 1: Planting */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedRole("planting");
+                    playSynthChime();
+                  }}
+                  className={`p-4 rounded-2xl border text-left transition duration-200 relative overflow-hidden ${
+                    selectedRole === "planting"
+                      ? "bg-pink-500/10 border-pink-500"
+                      : "bg-slate-950 border-slate-800 hover:border-slate-700"
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">🚶‍♂️🚴‍♀️</span>
+                    <div className="flex-1">
+                      <h3 className="font-bold text-xs text-pink-400">走路/騎車特攻隊 (種花專用)</h3>
+                      <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
+                        以種一株花 <strong className="text-white">6 分鐘</strong> 加上移動時間精算，規劃連續種花最優路線，出門一趟種最多花！
+                      </p>
+                    </div>
+                  </div>
+                  {selectedRole === "planting" && (
+                    <div className="absolute top-2 right-2 text-pink-400">
+                      <i className="fa-solid fa-circle-check"></i>
+                    </div>
+                  )}
+                </button>
+
+                {/* Option 2: Force Bloom */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedRole("force_bloom");
+                    playSynthChime();
+                  }}
+                  className={`p-4 rounded-2xl border text-left transition duration-200 relative overflow-hidden ${
+                    selectedRole === "force_bloom"
+                      ? "bg-purple-500/10 border-purple-500"
+                      : "bg-slate-950 border-slate-800 hover:border-slate-700"
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">🎯⚡</span>
+                    <div className="flex-1">
+                      <h3 className="font-bold text-xs text-purple-400">500m 強開先鋒隊 (強開專用)</h3>
+                      <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
+                        強開不用等待時間！利用 <strong className="text-white">500 米</strong> 雷達感應範圍，推薦最佳駐點，停在該點同時感應強開所有花朵！
+                      </p>
+                    </div>
+                  </div>
+                  {selectedRole === "force_bloom" && (
+                    <div className="absolute top-2 right-2 text-purple-400">
+                      <i className="fa-solid fa-circle-check"></i>
+                    </div>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Submit Action */}
+          <button
+            type="button"
+            onClick={handleLoginSubmit}
+            disabled={!selectedRole}
+            className={`w-full p-3.5 rounded-2xl font-black text-xs transition duration-200 flex items-center justify-center gap-2 shadow-lg ${
+              selectedRole
+                ? "bg-gradient-to-r from-pink-500 via-purple-600 to-indigo-600 hover:opacity-90 text-white cursor-pointer"
+                : "bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-850"
+            }`}
+          >
+            <i className="fa-solid fa-rocket"></i>
+            <span>進入基隆特攻戰區</span>
+          </button>
+
+          <p className="text-[9px] text-slate-500 text-center">
+            💡 本平台經由基隆大花社群數據驅動，隨時可於系統頂端切換身分。
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex flex-col pb-12 bg-[#0b0f19] text-[#f1f5f9]">
       
@@ -1669,6 +2026,22 @@ export default function App() {
 
               {/* Mobile quick actions for non-logged-in or standard viewers */}
               <div className="flex lg:hidden items-center gap-2">
+                {userRole && (
+                  <button
+                    onClick={() => {
+                      localStorage.removeItem("user_role");
+                      setUserRole(null);
+                      setSelectedRole(null);
+                      showToast("請重新選擇特攻身分");
+                      playSynthChime();
+                    }}
+                    className="text-[10px] font-black bg-pink-500/10 hover:bg-pink-500/20 border border-pink-500/30 text-pink-400 px-2 py-1.5 rounded-xl transition flex items-center gap-1"
+                    title="切換身分"
+                  >
+                    <span>{userRole === "planting" ? "🚶‍♂️種花" : "🎯強開"}</span>
+                    <i className="fa-solid fa-arrows-rotate text-[8px]"></i>
+                  </button>
+                )}
                 <div id="google-widget-mobile">
                   {googleUserEmail ? (
                     <button onClick={performGoogleLogout} className="text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 px-2.5 py-1.5 rounded-xl text-xs font-bold transition">登出</button>
@@ -1709,10 +2082,46 @@ export default function App() {
               >
                 👑 導航精選
               </button>
+              <div className="h-4 w-px bg-slate-800" />
+              <button
+                onClick={() => {
+                  setSelectedSuggestedSpot(null);
+                  setShowNavModal(true);
+                  playSynthChime();
+                }}
+                className="bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white font-extrabold px-3 py-1 rounded-xl transition active:scale-95 flex items-center gap-1.5 text-[10px] sm:text-[11px] shadow-md border border-pink-400/20"
+              >
+                <i className="fa-solid fa-compass"></i> 路線/駐點規劃
+              </button>
             </div>
           </div>
           
           <div className="hidden lg:flex flex-wrap items-center gap-3">
+            {userRole && (
+              <div className="flex items-center gap-2 bg-slate-950/80 rounded-2xl p-2 border border-purple-500/30 text-xs">
+                <span className="text-pink-400 font-bold">
+                  {userRole === "planting" ? "🚶‍♂️ 走路/騎車種花" : "🎯 強開雷達特攻"}
+                </span>
+                {userNickname && (
+                  <span className="text-slate-400 font-mono text-[10px]">
+                    [{userNickname}]
+                  </span>
+                )}
+                <button
+                  onClick={() => {
+                    localStorage.removeItem("user_role");
+                    setUserRole(null);
+                    setSelectedRole(null);
+                    showToast("請重新選擇身分");
+                    playSynthChime();
+                  }}
+                  className="text-slate-300 hover:text-red-400 text-[10px] bg-[#0b0f19] border border-slate-800 px-2 py-0.5 rounded-lg font-bold transition ml-1"
+                >
+                  切換身分
+                </button>
+              </div>
+            )}
+
             <div className="flex items-center gap-2 bg-slate-950/80 rounded-2xl p-2 border border-purple-500/30 text-xs">
               <div id="google-widget">
                 {googleUserEmail ? (
@@ -2570,103 +2979,347 @@ export default function App() {
       {showNavModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-md flex items-end sm:items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-t-3xl sm:rounded-3xl w-full max-w-md p-6 shadow-2xl animate-in fade-in slide-in-from-bottom-8 duration-200">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
               <div className="flex items-center gap-2">
-                <span className="text-xl">🗺️</span>
-                <h3 className="font-black text-sm sm:text-base text-slate-100">精選花點導航規劃</h3>
+                <span className="text-xl">🧭</span>
+                <h3 className="font-black text-sm sm:text-base text-slate-100">特攻路線與駐點規劃大師</h3>
               </div>
               <button onClick={() => setShowNavModal(false)} className="text-slate-500 hover:text-slate-300 p-1 transition">
                 <i className="fa-solid fa-circle-xmark text-lg"></i>
               </button>
             </div>
 
-            {isNavLocating ? (
-              <div className="py-12 flex flex-col items-center justify-center gap-4">
-                <div className="w-10 h-10 border-4 border-pink-500/20 border-t-pink-500 rounded-full animate-spin"></div>
-                <div className="text-center space-y-1">
-                  <p className="text-xs text-slate-300 font-bold">正在取得您的 GPS 目前定位...</p>
-                  <p className="text-[10px] text-slate-500">這將用於計算最優最短順序路徑</p>
+            {/* Modal Navigation Tabs */}
+            <div className="flex border-b border-slate-800/80 mb-4 mt-3">
+              <button
+                onClick={() => setNavModalTab("planting")}
+                className={`flex-1 pb-2.5 font-bold text-xs text-center border-b-2 transition ${
+                  navModalTab === "planting"
+                    ? "border-pink-500 text-pink-400"
+                    : "border-transparent text-slate-400 hover:text-slate-300"
+                }`}
+              >
+                🚶‍♂️/🚴‍♀️ 走路騎車最優種花
+              </button>
+              <button
+                onClick={() => setNavModalTab("force_bloom")}
+                className={`flex-1 pb-2.5 font-bold text-xs text-center border-b-2 transition ${
+                  navModalTab === "force_bloom"
+                    ? "border-purple-500 text-purple-400"
+                    : "border-transparent text-slate-400 hover:text-slate-300"
+                }`}
+              >
+                🎯 500m 強開最佳駐點
+              </button>
+            </div>
+
+            {navModalTab === "planting" ? (
+              <div className="space-y-4 py-1">
+                {/* Targets Filter */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-slate-400 font-bold block">🎯 篩選目標花點：</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => setPlantingTarget("leaf")}
+                      className={`py-1.5 px-3 rounded-xl border text-[11px] font-bold transition ${
+                        plantingTarget === "leaf"
+                          ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                          : "bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-900"
+                      }`}
+                    >
+                      🍃 僅未開花葉子
+                    </button>
+                    <button
+                      onClick={() => setPlantingTarget("all")}
+                      className={`py-1.5 px-3 rounded-xl border text-[11px] font-bold transition ${
+                        plantingTarget === "all"
+                          ? "bg-pink-500/10 border-pink-500/30 text-pink-400"
+                          : "bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-900"
+                      }`}
+                    >
+                      🌸 所有標記點位
+                    </button>
+                  </div>
                 </div>
-                <button 
-                  onClick={skipNavGeolocation} 
-                  className="mt-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs px-4 py-2 rounded-xl transition"
-                >
-                  ⚡ 跳過定位，直接自首站出發
-                </button>
+
+                {/* Speed Selector */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-slate-400 font-bold block">🚴 交通工具/移動時速：</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => setPlantingSpeed(5)}
+                      className={`py-1.5 px-3 rounded-xl border text-[11px] font-bold transition ${
+                        plantingSpeed === 5
+                          ? "bg-purple-500/10 border-purple-500/30 text-purple-400"
+                          : "bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-900"
+                      }`}
+                    >
+                      🚶‍♂️ 走路種花 (5 km/h)
+                    </button>
+                    <button
+                      onClick={() => setPlantingSpeed(15)}
+                      className={`py-1.5 px-3 rounded-xl border text-[11px] font-bold transition ${
+                        plantingSpeed === 15
+                          ? "bg-purple-500/10 border-purple-500/30 text-purple-400"
+                          : "bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-900"
+                      }`}
+                    >
+                      🚴‍♀️ 騎車/慢行 (15 km/h)
+                    </button>
+                  </div>
+                </div>
+
+                {/* Compute and display */}
+                {(() => {
+                  const routeData = getPlantingRouteData();
+                  if (routeData.path.length === 0) {
+                    return (
+                      <div className="py-6 text-center text-xs text-slate-500 bg-slate-950/40 rounded-2xl border border-slate-800">
+                        ⚠️ 當前無可規劃的目標花卉點位！
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="space-y-3">
+                      {/* Summary card */}
+                      <div className="grid grid-cols-3 gap-2 bg-slate-950/60 p-3 rounded-2xl border border-slate-800">
+                        <div className="text-center">
+                          <p className="text-[9px] text-slate-500">預計可種花</p>
+                          <p className="text-xs font-black text-pink-400 font-mono mt-0.5">{routeData.path.length} 朵</p>
+                        </div>
+                        <div className="text-center border-x border-slate-800">
+                          <p className="text-[9px] text-slate-500">總移動距離</p>
+                          <p className="text-xs font-black text-slate-200 font-mono mt-0.5">
+                            {routeData.totalDistance >= 1000 
+                              ? `${(routeData.totalDistance / 1000).toFixed(2)} km` 
+                              : `${Math.round(routeData.totalDistance)} m`}
+                          </p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-[9px] text-slate-500">預計總耗時</p>
+                          <p className="text-xs font-black text-purple-400 font-mono mt-0.5">
+                            {Math.floor(routeData.totalDuration / 60)} 分 {Math.round(routeData.totalDuration % 60)} 秒
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Timeline flow */}
+                      <div className="space-y-1 bg-slate-950/40 p-3 rounded-2xl border border-slate-850 max-h-[150px] overflow-y-auto font-sans">
+                        <p className="text-[9px] text-slate-500 font-bold mb-2">🧭 最優連續種植順序行程：</p>
+                        {routeData.steps.map((step, idx) => {
+                          const hNum = step.landmark.id;
+                          const name = step.landmark.name;
+                          if (step.type === "start") {
+                            return (
+                              <div key={idx} className="flex items-start gap-2 text-[11px] py-1">
+                                <span className="bg-emerald-500/20 text-emerald-400 w-4 h-4 rounded-full flex items-center justify-center font-bold text-[8px] shrink-0 mt-0.5">起</span>
+                                <div>
+                                  <span className="font-bold text-slate-200">#{hNum} {name}</span>
+                                  <span className="text-[9px] text-slate-500 ml-1.5">(停留 6m 種花)</span>
+                                </div>
+                              </div>
+                            );
+                          } else {
+                            const distText = step.distance! >= 1000 
+                              ? `${(step.distance! / 1000).toFixed(2)}km` 
+                              : `${Math.round(step.distance!)}m`;
+                            const timeText = step.travelTime! >= 60 
+                              ? `${Math.floor(step.travelTime! / 60)}m${Math.round(step.travelTime! % 60)}s` 
+                              : `${Math.round(step.travelTime!)}s`;
+                            return (
+                              <div key={idx} className="space-y-1">
+                                <div className="pl-2.5 border-l border-dashed border-slate-800 py-0.5 flex items-center gap-1.5 text-[9px] text-slate-500 font-mono">
+                                  <i className="fa-solid fa-arrow-down-long text-[8px] text-purple-500/40"></i>
+                                  <span>移至下站 {distText} (約 {timeText})</span>
+                                </div>
+                                <div className="flex items-start gap-2 text-[11px] py-1">
+                                  <span className="bg-purple-500/20 text-purple-400 w-4 h-4 rounded-full flex items-center justify-center font-bold text-[8px] shrink-0 mt-0.5">{idx + 1}</span>
+                                  <div>
+                                    <span className="font-bold text-slate-200">#{hNum} {name}</span>
+                                    <span className="text-[9px] text-slate-500 ml-1.5">(停留 6m 種花)</span>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          }
+                        })}
+                      </div>
+
+                      {/* Google map action */}
+                      <button
+                        onClick={() => {
+                          const origin = `${routeData.path[0].lat},${routeData.path[0].lng}`;
+                          const destination = `${routeData.path[routeData.path.length - 1].lat},${routeData.path[routeData.path.length - 1].lng}`;
+                          let waypoints = "";
+                          if (routeData.path.length > 2) {
+                            const intermediate = routeData.path.slice(1, routeData.path.length - 1);
+                            waypoints = intermediate.map(p => `${p.lat},${p.lng}`).join("|");
+                          }
+                          let gUrl = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}`;
+                          if (waypoints) {
+                            gUrl += `&waypoints=${encodeURIComponent(waypoints)}`;
+                          }
+                          gUrl += `&travelmode=${plantingSpeed === 5 ? "walking" : "bicycling"}`;
+                          window.open(gUrl, "_blank");
+                        }}
+                        className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-extrabold p-3 rounded-2xl text-xs transition shadow-lg flex items-center justify-center gap-2"
+                      >
+                        <i className="fa-solid fa-map-location-dot text-sm"></i>
+                        <span>開啟 Google Maps 連續種花導航</span>
+                      </button>
+                    </div>
+                  );
+                })()}
               </div>
             ) : (
-              <div className="py-4 space-y-4">
-                {/* Route sequence summary */}
-                <div className="bg-slate-950/60 p-3.5 rounded-2xl border border-slate-800/80 space-y-2">
-                  <div className="text-[11px] font-bold text-slate-400 flex items-center justify-between">
-                    <span>👑 最優規劃路徑 ({navPath.length} 站)</span>
-                    <span className="text-[10px] text-pink-400">連續最短路線</span>
+              <div className="space-y-4 py-1">
+                {/* Targets Filter */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-slate-400 font-bold block">🎯 篩選目標花點：</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => {
+                        setForceBloomTarget("leaf");
+                        setSelectedSuggestedSpot(null);
+                      }}
+                      className={`py-1.5 px-3 rounded-xl border text-[11px] font-bold transition ${
+                        forceBloomTarget === "leaf"
+                          ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                          : "bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-900"
+                      }`}
+                    >
+                      🍃 僅未開花葉子
+                    </button>
+                    <button
+                      onClick={() => {
+                        setForceBloomTarget("all");
+                        setSelectedSuggestedSpot(null);
+                      }}
+                      className={`py-1.5 px-3 rounded-xl border text-[11px] font-bold transition ${
+                        forceBloomTarget === "all"
+                          ? "bg-pink-500/10 border-pink-500/30 text-pink-400"
+                          : "bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-900"
+                      }`}
+                    >
+                      🌸 所有標記點位
+                    </button>
                   </div>
-                  <div className="flex flex-wrap items-center gap-1.5 text-xs max-h-[120px] overflow-y-auto">
-                    {navPath.map((item, idx) => (
-                      <div key={idx} className="flex items-center gap-1 bg-slate-900 border border-slate-800/60 px-2 py-1 rounded-lg">
-                        <span className="text-pink-400 font-bold font-mono text-[10px]">#{item.id}</span>
-                        <span className="text-slate-300 text-[10px] font-medium max-w-[80px] truncate">{item.name}</span>
-                        {idx < navPath.length - 1 && <i className="fa-solid fa-chevron-right text-[8px] text-slate-600 ml-1"></i>}
+                </div>
+
+                {/* List of recommended spots */}
+                {(() => {
+                  const spots = getSuggestedParkingSpots();
+                  if (spots.length === 0) {
+                    return (
+                      <div className="py-6 text-center text-xs text-slate-500 bg-slate-950/40 rounded-2xl border border-slate-800">
+                        ⚠️ 當前無可規劃的強開推薦駐點！
                       </div>
-                    ))}
-                  </div>
-                </div>
+                    );
+                  }
 
-                {/* Main app launch options */}
-                <div className="space-y-2.5">
-                  <p className="text-slate-400 text-[11px] font-semibold">請選擇您手機上要開啟的導航地圖應用程式：</p>
-                  
-                  {/* Google Maps universal link option */}
-                  {navGoogleUrl && (
-                    <a 
-                      href={navGoogleUrl} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-extrabold p-3.5 rounded-2xl text-xs sm:text-sm transition shadow-lg flex items-center justify-center gap-2.5 active:scale-[0.99]"
-                    >
-                      <i className="fa-brands fa-google text-lg"></i>
-                      <span>開啟 Google Maps (支援多停靠點)</span>
-                    </a>
-                  )}
+                  return (
+                    <div className="space-y-3">
+                      <p className="text-[10px] text-slate-400 leading-relaxed bg-slate-950/40 p-2.5 rounded-xl border border-slate-800">
+                        💡 <strong>強開駐點原理：</strong> 強開不用等待時間（距離500米感應範圍）。以下駐點經最優中心化（Centroid）精算，您可以停駐在此點，同時感應強開圓圈內的所有大花點位！
+                      </p>
 
-                  {/* Apple Maps option */}
-                  {navAppleUrl && (
-                    <a 
-                      href={navAppleUrl} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="w-full bg-slate-100 hover:bg-white text-slate-950 font-extrabold p-3.5 rounded-2xl text-xs sm:text-sm transition shadow-lg flex items-center justify-center gap-2.5 active:scale-[0.99]"
-                    >
-                      <i className="fa-solid fa-apple-whole text-lg"></i>
-                      <span>開啟 Apple Maps (iPhone 專用首站)</span>
-                    </a>
-                  )}
-                </div>
+                      <div className="space-y-2 max-h-[190px] overflow-y-auto pr-1">
+                        {spots.map((spot, index) => {
+                          const isSelected = selectedSuggestedSpot && selectedSuggestedSpot.lat === spot.lat && selectedSuggestedSpot.lng === spot.lng;
+                          return (
+                            <div 
+                              key={index} 
+                              className={`p-3 rounded-2xl border transition duration-150 ${
+                                isSelected 
+                                  ? "bg-purple-950/40 border-purple-500" 
+                                  : "bg-slate-950/60 border-slate-800/80 hover:border-slate-700"
+                              }`}
+                            >
+                              <div className="flex items-center justify-between mb-1.5">
+                                <span className="bg-purple-900 text-purple-200 text-[9px] font-black px-2 py-0.5 rounded-full">
+                                  🎯 最佳駐點 #{index + 1}
+                                </span>
+                                <span className="text-pink-400 font-extrabold text-[11px]">
+                                  ⚡ 可強開 {spot.coveredIds.length} 花
+                                </span>
+                              </div>
+                              
+                              <div className="text-[10px] text-slate-300 space-y-1.5 my-2">
+                                <div className="flex flex-wrap gap-1">
+                                  {spot.coveredNames.map((name, nIdx) => (
+                                    <span key={nIdx} className="bg-slate-900/80 px-1.5 py-0.5 rounded border border-slate-800/60 text-slate-400 text-[9px] whitespace-nowrap">
+                                      #{spot.coveredIds[nIdx]} {name}
+                                    </span>
+                                  ))}
+                                </div>
+                                <p className="text-[9px] text-slate-500 font-mono">
+                                  GPS: {spot.lat.toFixed(6)}, {spot.lng.toFixed(6)} (最遠花 {Math.round(spot.maxDist)}m)
+                                </p>
+                              </div>
 
-                {/* Link copier action */}
-                <div className="pt-1">
-                  <button 
-                    onClick={() => {
-                      if (!navGoogleUrl) return;
-                      const tempTextarea = document.createElement('textarea');
-                      tempTextarea.value = navGoogleUrl;
-                      document.body.appendChild(tempTextarea);
-                      tempTextarea.select();
-                      document.execCommand('copy');
-                      document.body.removeChild(tempTextarea);
-                      showToast("📋 導航路徑連結已複製！可貼到 LINE 分享");
-                    }} 
-                    className="w-full bg-slate-950 hover:bg-slate-900 text-slate-400 hover:text-slate-300 border border-slate-800 text-xs py-2.5 rounded-xl transition flex items-center justify-center gap-1.5"
-                  >
-                    <i className="fa-solid fa-copy"></i>
-                    <span>複製完整的 Google Maps 路線連結</span>
-                  </button>
-                </div>
+                              <div className="grid grid-cols-3 gap-1.5 pt-2 border-t border-slate-900">
+                                <button
+                                  onClick={() => {
+                                    setSelectedSuggestedSpot({ lat: spot.lat, lng: spot.lng, coveredIds: spot.coveredIds });
+                                    if (mapRef.current) {
+                                      mapRef.current.setView([spot.lat, spot.lng], 16);
+                                    }
+                                    showToast(`🎯 已在地圖上畫出強開駐點 #${index + 1} 與 500m 範圍！`);
+                                    playSynthChime();
+                                  }}
+                                  className={`py-1 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition ${
+                                    isSelected 
+                                      ? "bg-purple-600 text-white" 
+                                      : "bg-slate-900 hover:bg-slate-800 text-purple-400 border border-purple-500/10"
+                                  }`}
+                                >
+                                  <i className="fa-solid fa-location-crosshairs"></i>
+                                  <span>{isSelected ? "已設雷達" : "雷達範圍"}</span>
+                                </button>
+                                
+                                <button
+                                  onClick={() => {
+                                    const coordinateString = `${spot.lat.toFixed(7)}, ${spot.lng.toFixed(7)}`;
+                                    const tempTextarea = document.createElement('textarea');
+                                    tempTextarea.value = coordinateString;
+                                    document.body.appendChild(tempTextarea);
+                                    tempTextarea.select();
+                                    document.execCommand('copy');
+                                    document.body.removeChild(tempTextarea);
+                                    showToast(`📋 駐點座標已複製：${coordinateString}`);
+                                  }}
+                                  className="bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 py-1 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition"
+                                >
+                                  <i className="fa-solid fa-copy"></i>
+                                  <span>複製座標</span>
+                                </button>
+
+                                <button
+                                  onClick={() => {
+                                    const gUrl = `https://www.google.com/maps/dir/?api=1&destination=${spot.lat},${spot.lng}`;
+                                    window.open(gUrl, "_blank");
+                                  }}
+                                  className="bg-slate-900 hover:bg-slate-800 text-emerald-400 border border-emerald-500/10 py-1 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition"
+                                >
+                                  <i className="fa-solid fa-location-arrow"></i>
+                                  <span>導航駐點</span>
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
-            <div className="pt-4 border-t border-slate-800 flex justify-end">
+            <div className="pt-4 border-t border-slate-800 flex justify-between items-center">
+              <span className="text-[10px] text-slate-500">
+                {selectedSuggestedSpot ? "✨ 地圖上正顯示 500m 駐點雷達" : "💡 地圖支援同步顯示駐點雷達"}
+              </span>
               <button 
                 onClick={() => setShowNavModal(false)} 
                 className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold px-5 py-2.5 rounded-xl text-xs transition"
