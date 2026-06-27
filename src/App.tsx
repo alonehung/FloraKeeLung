@@ -166,6 +166,7 @@ export default function App() {
     const saved = localStorage.getItem("user_role");
     return (saved === "planting" || saved === "force_bloom") ? saved : null;
   });
+  const [mapReady, setMapReady] = useState(false);
   const [activeRegion] = useState("keelung");
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -311,6 +312,7 @@ export default function App() {
         L.control.zoom({ position: 'bottomright' }).addTo(mapObj);
         mapRef.current = mapObj;
         isMapInitialized.current = true;
+        setMapReady(true);
 
         // One-time centering on initial landmarks if available
         const stored = localStorage.getItem(`${LOCAL_STORAGE_KEY_PREFIX}_master_list`);
@@ -340,6 +342,7 @@ export default function App() {
         }
         mapRef.current = null;
         isMapInitialized.current = false;
+        setMapReady(false);
       }
     };
   }, [userRole]);
@@ -1435,7 +1438,7 @@ export default function App() {
       });
       suggestedSpotMarkerRef.current = L.marker([selectedSuggestedSpot.lat, selectedSuggestedSpot.lng], { icon: centerIcon }).addTo(mapRef.current);
     }
-  }, [landmarks, statusFilter, searchTerm, selectedSuggestedSpot]);
+  }, [landmarks, statusFilter, searchTerm, selectedSuggestedSpot, mapReady, userRole]);
 
   // Focus table row
   const highlightRowInTable = (id: number) => {
