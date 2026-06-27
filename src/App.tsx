@@ -244,8 +244,8 @@ export default function App() {
     playSynthChime();
   };
   const [plantingSpeed, setPlantingSpeed] = useState<number>(5); // 5 km/h for walking, 15 km/h for riding
-  const [plantingTarget, setPlantingTarget] = useState<"leaf" | "all">("leaf");
-  const [forceBloomTarget, setForceBloomTarget] = useState<"leaf" | "all">("leaf");
+  const [plantingTarget, setPlantingTarget] = useState<"leaf" | "all">("all");
+  const [forceBloomTarget, setForceBloomTarget] = useState<"leaf" | "all">("all");
   const [selectedSuggestedSpot, setSelectedSuggestedSpot] = useState<{ lat: number; lng: number; coveredIds: number[] } | null>(null);
   const [selectedRouteIndex, setSelectedRouteIndex] = useState<number>(0);
 
@@ -3361,33 +3361,6 @@ export default function App() {
 
             {navModalTab === "planting" ? (
               <div className="space-y-4 py-1">
-                {/* Targets Filter */}
-                <div className="space-y-1.5">
-                  <label className="text-[10px] text-slate-400 font-bold block">🎯 篩選目標花點：</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      onClick={() => setPlantingTarget("leaf")}
-                      className={`py-1.5 px-3 rounded-xl border text-[11px] font-bold transition ${
-                        plantingTarget === "leaf"
-                          ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
-                          : "bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-900"
-                      }`}
-                    >
-                      🍃 僅未開花葉子
-                    </button>
-                    <button
-                      onClick={() => setPlantingTarget("all")}
-                      className={`py-1.5 px-3 rounded-xl border text-[11px] font-bold transition ${
-                        plantingTarget === "all"
-                          ? "bg-pink-500/10 border-pink-500/30 text-pink-400"
-                          : "bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-900"
-                      }`}
-                    >
-                      🌸 所有標記點位
-                    </button>
-                  </div>
-                </div>
-
                 {/* Speed Selector */}
                 <div className="space-y-1.5">
                   <label className="text-[10px] text-slate-400 font-bold block">🚴 交通工具/移動時速：</label>
@@ -3550,39 +3523,6 @@ export default function App() {
               </div>
             ) : (
               <div className="space-y-4 py-1">
-                {/* Targets Filter */}
-                <div className="space-y-1.5">
-                  <label className="text-[10px] text-slate-400 font-bold block">🎯 篩選目標花點：</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      onClick={() => {
-                        setForceBloomTarget("leaf");
-                        setSelectedSuggestedSpot(null);
-                      }}
-                      className={`py-1.5 px-3 rounded-xl border text-[11px] font-bold transition ${
-                        forceBloomTarget === "leaf"
-                          ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
-                          : "bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-900"
-                      }`}
-                    >
-                      🍃 僅未開花葉子
-                    </button>
-                    <button
-                      onClick={() => {
-                        setForceBloomTarget("all");
-                        setSelectedSuggestedSpot(null);
-                      }}
-                      className={`py-1.5 px-3 rounded-xl border text-[11px] font-bold transition ${
-                        forceBloomTarget === "all"
-                          ? "bg-pink-500/10 border-pink-500/30 text-pink-400"
-                          : "bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-900"
-                      }`}
-                    >
-                      🌸 所有標記點位
-                    </button>
-                  </div>
-                </div>
-
                 {/* List of recommended spots */}
                 {(() => {
                   const spots = getMultipleForceBloomRoutes();
