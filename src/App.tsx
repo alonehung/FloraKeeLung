@@ -187,19 +187,34 @@ const getLeafWindow = (flower: { expire?: string | null }, currentTimeMs: number
 };
 
 // Helper to get the harvest window of a flower for freeloader (white-pying) mode
+// The window corresponds to when the flower is either in its leaf state or in its ribbon (first hour of blooming) state.
 const getHarvestWindow = (flower: { expire?: string | null }, currentTimeMs: number) => {
   const expireTime = flower.expire ? new Date(flower.expire).getTime() : 0;
   if (expireTime > currentTimeMs) {
-    // Currently blooming, can harvest immediately until it expires
+    // Currently blooming
+    const ribbonExpireTime = expireTime - 22 * 60 * 60 * 1000; // ribbon is first 1 hour of the 23-hour bloom
+    if (currentTimeMs < ribbonExpireTime) {
+      // Ribbon is still active
+      return {
+        start: currentTimeMs,
+        end: ribbonExpireTime
+      };
+    } else {
+      // Ribbon is expired. It will become a leaf at expireTime.
+      // Leaf state lasts for 30 mins, and will be planted/bloomed within 15 mins, staying in ribbon for another 1 hour.
+      // Thus, the combined next leaf & ribbon window is from expireTime to expireTime + 75 mins.
+      return {
+        start: expireTime,
+        end: expireTime + 75 * 60 * 1000
+      };
+    }
+  } else {
+    // Currently a leaf
+    // It is currently a leaf, and will be planted/bloomed by others within 15 mins, then staying in ribbon for 1 hour.
+    // Thus, the leaf & ribbon window is from now (currentTimeMs) to now + 75 mins.
     return {
       start: currentTimeMs,
-      end: expireTime
-    };
-  } else {
-    // Currently a leaf: others will bloom it in 15 minutes, after which it stays bloomed for 23 hours
-    return {
-      start: currentTimeMs + 15 * 60 * 1000,
-      end: currentTimeMs + 15 * 60 * 1000 + 23 * 60 * 60 * 1000
+      end: currentTimeMs + 75 * 60 * 1000
     };
   }
 };
