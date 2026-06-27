@@ -19,6 +19,15 @@ const GOOGLE_CLIENT_ID_KEY = 'keelung-google-client-id-v6';
 const GOOGLE_SHEET_ID_KEY = 'keelung-google-sheet-id-v6';
 const MANUAL_TOKEN_KEY = 'keelung-manual-token-v6';
 
+const ROUTE_COLORS = [
+  { name: "紅色", hex: "#ef4444", borderClass: "border-red-500", textClass: "text-red-400", bgClass: "bg-red-500/10 border-red-500/30 font-bold" },
+  { name: "藍色", hex: "#3b82f6", borderClass: "border-blue-500", textClass: "text-blue-400", bgClass: "bg-blue-500/10 border-blue-500/30 font-bold" },
+  { name: "綠色", hex: "#10b981", borderClass: "border-emerald-500", textClass: "text-emerald-400", bgClass: "bg-emerald-500/10 border-emerald-500/30 font-bold" },
+  { name: "紫色", hex: "#a855f7", borderClass: "border-purple-500", textClass: "text-purple-400", bgClass: "bg-purple-500/10 border-purple-500/30 font-bold" },
+  { name: "橘色", hex: "#f97316", borderClass: "border-orange-500", textClass: "text-orange-400", bgClass: "bg-orange-500/10 border-orange-500/30 font-bold" },
+  { name: "黃色", hex: "#f59e0b", borderClass: "border-amber-500", textClass: "text-amber-400", bgClass: "bg-amber-500/10 border-amber-500/30 font-bold" }
+];
+
 const DEFAULT_CLIENT_ID = '642819576340-7cul2favaq2kmn21bur34papjb8ofci7.apps.googleusercontent.com';
 const DEFAULT_SHEET_ID = '1BmWfet3J7LaCrJZfNe8RN58LCI990o_9NySRRCc0BpU';
 
@@ -238,6 +247,7 @@ export default function App() {
   const [plantingTarget, setPlantingTarget] = useState<"leaf" | "all">("leaf");
   const [forceBloomTarget, setForceBloomTarget] = useState<"leaf" | "all">("leaf");
   const [selectedSuggestedSpot, setSelectedSuggestedSpot] = useState<{ lat: number; lng: number; coveredIds: number[] } | null>(null);
+  const [selectedRouteIndex, setSelectedRouteIndex] = useState<number>(0);
 
   // Refs for Leaflet Map
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -245,6 +255,8 @@ export default function App() {
   const markersRef = useRef<Record<number, any>>({});
   const suggestedSpotCircleRef = useRef<any>(null);
   const suggestedSpotMarkerRef = useRef<any>(null);
+  const polylinesRef = useRef<any[]>([]);
+  const circlesRef = useRef<any[]>([]);
   const isMapInitialized = useRef(false);
 
   // Synths (ToneJS)
@@ -1010,7 +1022,7 @@ export default function App() {
     playSynthChime();
   };
 
-  const getPlantingRouteData = () => {
+  const getMultiplePlantingRoutes = () => {
     // Filter target landmarks based on user selection ("leaf" or "all")
     const targets = processedPoints.filter(p => {
       if (p.region !== activeRegion) return false;
@@ -1021,82 +1033,202 @@ export default function App() {
     });
 
     if (targets.length === 0) {
-      return {
-        path: [],
-        totalDistance: 0,
-        totalTravelTime: 0,
-        totalPlantingTime: 0,
-        totalDuration: 0,
-        steps: []
-      };
+      return [];
     }
 
-    // Solve TSP with Nearest Neighbor
-    const path: typeof targets = [];
-    const remaining = [...targets];
-    
-    let curr = remaining[0];
-    path.push(curr);
-    remaining.splice(0, 1);
-
-    while (remaining.length > 0) {
-      let bestIdx = 0;
-      let bestDist = Infinity;
-      for (let i = 0; i < remaining.length; i++) {
-        const d = getDistance(curr.lat, curr.lng, remaining[i].lat, remaining[i].lng);
-        if (d < bestDist) {
-          bestDist = d;
-          bestIdx = i;
-        }
-      }
-      curr = remaining[bestIdx];
-      path.push(curr);
-      remaining.splice(bestIdx, 1);
-    }
-
-    // Compute distances and times based on plantingSpeed
-    const speedMps = (plantingSpeed * 1000) / 3600;
-    let totalDistance = 0;
-    const steps: {
-      type: "start" | "move";
-      landmark: typeof targets[0];
-      distance?: number;
-      travelTime?: number;
+    // We want to partition the targets into separate sequential routes of at least 5 flowers each.
+    // Let's copy targets and work on a mutable list of unassigned targets
+    let unassigned = [...targets];
+    const routes: {
+      path: typeof targets;
+      totalDistance: number;
+      totalTravelTime: number;
+      totalPlantingTime: number;
+      totalDuration: number;
+      steps: {
+        type: "start" | "move";
+        landmark: typeof targets[0];
+        distance?: number;
+        travelTime?: number;
+      }[];
+      recommendedStartTime: string;
+      startTimeMs: number;
     }[] = [];
 
-    steps.push({
-      type: "start",
-      landmark: path[0]
-    });
+    const speedMps = (plantingSpeed * 1000) / 3600;
 
-    for (let i = 1; i < path.length; i++) {
-      const d = getDistance(path[i - 1].lat, path[i - 1].lng, path[i].lat, path[i].lng);
-      totalDistance += d;
-      const tTime = d / speedMps;
+    // Helper to calculate route details for a given ordered path
+    const calculateRouteDetails = (path: typeof targets) => {
+      let totalDistance = 0;
+      const steps: {
+        type: "start" | "move";
+        landmark: typeof targets[0];
+        distance?: number;
+        travelTime?: number;
+      }[] = [];
+
       steps.push({
-        type: "move",
-        landmark: path[i],
-        distance: d,
-        travelTime: tTime
+        type: "start",
+        landmark: path[0]
       });
+
+      for (let i = 1; i < path.length; i++) {
+        const d = getDistance(path[i - 1].lat, path[i - 1].lng, path[i].lat, path[i].lng);
+        totalDistance += d;
+        const tTime = d / speedMps;
+        steps.push({
+          type: "move",
+          landmark: path[i],
+          distance: d,
+          travelTime: tTime
+        });
+      }
+
+      const totalTravelTime = totalDistance / speedMps;
+      const totalPlantingTime = path.length * 6 * 60; // 6 mins per flower in seconds
+      const totalDuration = totalTravelTime + totalPlantingTime;
+
+      // Calculate recommendedStartTime:
+      // S_max = min_j (expireTime_j - j * 6m - travelTime_j)
+      let minSStart = Infinity;
+      let accumulatedTravelTime = 0;
+
+      for (let j = 0; j < path.length; j++) {
+        const currFlower = path[j];
+        const expireTime = currFlower.expire ? new Date(currFlower.expire).getTime() : Infinity;
+        
+        if (j > 0) {
+          const prevFlower = path[j - 1];
+          const dist = getDistance(prevFlower.lat, prevFlower.lng, currFlower.lat, currFlower.lng);
+          accumulatedTravelTime += dist / speedMps;
+        }
+        
+        const plantingDelaySec = j * 6 * 60; // 6 mins per flower in seconds
+        const delayMs = (plantingDelaySec + accumulatedTravelTime) * 1000;
+        
+        if (expireTime !== Infinity) {
+          const sRequiredForThisFlower = expireTime - delayMs;
+          if (sRequiredForThisFlower < minSStart) {
+            minSStart = sRequiredForThisFlower;
+          }
+        }
+      }
+
+      let recommendedStartTime = "可立即出發";
+      let startTimeMs = now;
+      if (minSStart !== Infinity) {
+        if (minSStart <= now) {
+          recommendedStartTime = "可立即出發";
+        } else {
+          startTimeMs = minSStart;
+          const dateObj = new Date(minSStart);
+          recommendedStartTime = `${dateObj.getHours().toString().padStart(2, '0')}:${dateObj.getMinutes().toString().padStart(2, '0')} 出發`;
+        }
+      }
+
+      return {
+        path,
+        totalDistance,
+        totalTravelTime,
+        totalPlantingTime,
+        totalDuration,
+        steps,
+        recommendedStartTime,
+        startTimeMs
+      };
+    };
+
+    // Partition unassigned targets into routes of size 5
+    while (unassigned.length >= 5) {
+      // Find starting point (prioritize earliest expire time among blooming, or first unassigned)
+      let startIdx = 0;
+      let earliestExpire = Infinity;
+      for (let i = 0; i < unassigned.length; i++) {
+        const exp = unassigned[i].expire ? new Date(unassigned[i].expire!).getTime() : Infinity;
+        if (exp < earliestExpire) {
+          earliestExpire = exp;
+          startIdx = i;
+        }
+      }
+
+      const path: typeof targets = [];
+      let curr = unassigned[startIdx];
+      path.push(curr);
+      unassigned.splice(startIdx, 1);
+
+      // Greedily find the nearest 4 unassigned neighbors
+      for (let k = 0; k < 4; k++) {
+        if (unassigned.length === 0) break;
+        let bestIdx = 0;
+        let bestDist = Infinity;
+        for (let i = 0; i < unassigned.length; i++) {
+          const d = getDistance(curr.lat, curr.lng, unassigned[i].lat, unassigned[i].lng);
+          if (d < bestDist) {
+            bestDist = d;
+            bestIdx = i;
+          }
+        }
+        curr = unassigned[bestIdx];
+        path.push(curr);
+        unassigned.splice(bestIdx, 1);
+      }
+
+      // Calculate details and add
+      routes.push(calculateRouteDetails(path));
     }
 
-    const totalTravelTime = totalDistance / speedMps;
-    const totalPlantingTime = path.length * 6 * 60; // 6 mins per flower in seconds
-    const totalDuration = totalTravelTime + totalPlantingTime;
+    // If there are left-over targets (fewer than 5) and we already have at least one route:
+    // Append each remaining target to its nearest route end/start point.
+    if (unassigned.length > 0 && routes.length > 0) {
+      while (unassigned.length > 0) {
+        const item = unassigned[0];
+        let bestRouteIdx = 0;
+        let bestDist = Infinity;
+        let appendTo = "end"; // or "start"
 
-    return {
-      path,
-      totalDistance,
-      totalTravelTime,
-      totalPlantingTime,
-      totalDuration,
-      steps
-    };
+        for (let r = 0; r < routes.length; r++) {
+          const routePath = routes[r].path;
+          const startPt = routePath[0];
+          const endPt = routePath[routePath.length - 1];
+          
+          const distToStart = getDistance(item.lat, item.lng, startPt.lat, startPt.lng);
+          const distToEnd = getDistance(item.lat, item.lng, endPt.lat, endPt.lng);
+
+          if (distToStart < bestDist) {
+            bestDist = distToStart;
+            bestRouteIdx = r;
+            appendTo = "start";
+          }
+          if (distToEnd < bestDist) {
+            bestDist = distToEnd;
+            bestRouteIdx = r;
+            appendTo = "end";
+          }
+        }
+
+        // Insert/append the item to the best route
+        const targetRoute = routes[bestRouteIdx];
+        let newPath = [...targetRoute.path];
+        if (appendTo === "start") {
+          newPath.unshift(item);
+        } else {
+          newPath.push(item);
+        }
+
+        // Re-calculate the route details
+        routes[bestRouteIdx] = calculateRouteDetails(newPath);
+        unassigned.splice(0, 1);
+      }
+    } else if (unassigned.length > 0 && routes.length === 0) {
+      // If total targets < 5, just put them all into a single route of length < 5
+      routes.push(calculateRouteDetails(unassigned));
+    }
+
+    // Sort routes by recommended startTime (earliest first)
+    return routes.sort((a, b) => a.startTimeMs - b.startTimeMs);
   };
 
-  const getSuggestedParkingSpots = () => {
-    // Filter target landmarks based on user selection ("leaf" or "all")
+  const getMultipleForceBloomRoutes = () => {
     const targets = processedPoints.filter(p => {
       if (p.region !== activeRegion) return false;
       if (forceBloomTarget === "leaf") {
@@ -1107,30 +1239,36 @@ export default function App() {
 
     if (targets.length === 0) return [];
 
-    const spots: { lat: number; lng: number; coveredIds: number[]; coveredNames: string[]; maxDist: number }[] = [];
+    const spots: {
+      lat: number;
+      lng: number;
+      coveredIds: number[];
+      coveredNames: string[];
+      maxDist: number;
+      recommendedStartTime: string;
+      startTimeMs: number;
+      totalDuration: number; // 30 mins
+      flowersCount: number;
+    }[] = [];
     let uncovered = [...targets];
 
-    while (uncovered.length > 0 && spots.length < 10) {
-      let bestCandidate: { lat: number; lng: number; coveredIds: number[]; coveredNames: string[]; maxDist: number } | null = null;
+    while (uncovered.length > 0 && spots.length < ROUTE_COLORS.length) {
+      let bestCandidate: typeof spots[0] | null = null;
       let maxNewCoveredCount = 0;
 
       for (const seed of targets) {
-        // Find all target points within 500m of seed
         const nearby = targets.filter(t => getDistance(seed.lat, seed.lng, t.lat, t.lng) <= 500);
         if (nearby.length === 0) continue;
 
-        // Calculate centroid of nearby points
+        // Centroid
         const sumLat = nearby.reduce((acc, p) => acc + p.lat, 0);
         const sumLng = nearby.reduce((acc, p) => acc + p.lng, 0);
         const cLat = sumLat / nearby.length;
         const cLng = sumLng / nearby.length;
 
-        // Verify which points from the whole list are actually within 500m of the centroid
         const coveredByCentroid = targets.filter(t => getDistance(cLat, cLng, t.lat, t.lng) <= 500);
-        
-        // Calculate newly covered points in uncovered pool
         const newlyCovered = coveredByCentroid.filter(t => uncovered.some(u => u.id === t.id));
-        
+
         if (newlyCovered.length > maxNewCoveredCount) {
           let maxDist = 0;
           coveredByCentroid.forEach(t => {
@@ -1138,13 +1276,52 @@ export default function App() {
             if (d > maxDist) maxDist = d;
           });
 
+          // Calculate suggested starting time for this centroid:
+          // Earliest time when this 500m circle has at least 5 leaves.
+          // Leaf flowers are available immediately (expireTime = now).
+          // Blooming flowers are available after expireTime.
+          const circleFlowersWithTime = coveredByCentroid.map(f => ({
+            ...f,
+            expireTime: f.expire ? new Date(f.expire).getTime() : now
+          })).sort((a, b) => a.expireTime - b.expireTime);
+
+          let bestForceBloomTime = now;
+          if (circleFlowersWithTime.length >= 5) {
+            // Check if we already have 5 leaves (expireTime <= now)
+            const currentLeavesCount = circleFlowersWithTime.filter(f => f.expireTime <= now).length;
+            if (currentLeavesCount < 5) {
+              const needed = 5 - currentLeavesCount;
+              const blooming = circleFlowersWithTime.filter(f => f.expireTime > now);
+              if (needed <= blooming.length) {
+                bestForceBloomTime = blooming[needed - 1].expireTime;
+              }
+            }
+          } else {
+            // Circle has fewer than 5 flowers total
+            bestForceBloomTime = Infinity;
+          }
+
+          let recommendedStartTime = "無符合 5 花點之駐點";
+          if (bestForceBloomTime !== Infinity) {
+            if (bestForceBloomTime <= now) {
+              recommendedStartTime = "可立即強開";
+            } else {
+              const dateObj = new Date(bestForceBloomTime);
+              recommendedStartTime = `${dateObj.getHours().toString().padStart(2, '0')}:${dateObj.getMinutes().toString().padStart(2, '0')} 強開`;
+            }
+          }
+
           maxNewCoveredCount = newlyCovered.length;
           bestCandidate = {
             lat: cLat,
             lng: cLng,
             coveredIds: coveredByCentroid.map(t => t.id),
             coveredNames: coveredByCentroid.map(t => t.name),
-            maxDist
+            maxDist,
+            recommendedStartTime,
+            startTimeMs: bestForceBloomTime,
+            totalDuration: 30 * 60, // 30 mins in seconds
+            flowersCount: coveredByCentroid.length
           };
         }
       }
@@ -1158,7 +1335,8 @@ export default function App() {
       }
     }
 
-    return spots.sort((a, b) => b.coveredIds.length - a.coveredIds.length);
+    // Filter to only those covering at least 5 flowers
+    return spots.filter(s => s.coveredIds.length >= 5).sort((a, b) => a.startTimeMs - b.startTimeMs);
   };
 
   const handleExportSelectedRoute = () => {
@@ -1375,6 +1553,32 @@ export default function App() {
     }
     markersRef.current = {};
 
+    // Clear old polylines & circles
+    polylinesRef.current.forEach(layer => mapRef.current.removeLayer(layer));
+    polylinesRef.current = [];
+    circlesRef.current.forEach(layer => mapRef.current.removeLayer(layer));
+    circlesRef.current = [];
+
+    // Map each landmark ID to its route color for visual linking
+    const routeColorMap: Record<number, typeof ROUTE_COLORS[0]> = {};
+    if (userRole === "planting") {
+      const routes = getMultiplePlantingRoutes();
+      routes.forEach((route, rIdx) => {
+        const colorInfo = ROUTE_COLORS[rIdx % ROUTE_COLORS.length];
+        route.path.forEach(p => {
+          routeColorMap[p.id] = colorInfo;
+        });
+      });
+    } else if (userRole === "force_bloom") {
+      const spots = getMultipleForceBloomRoutes();
+      spots.forEach((spot, sIdx) => {
+        const colorInfo = ROUTE_COLORS[sIdx % ROUTE_COLORS.length];
+        spot.coveredIds.forEach(id => {
+          routeColorMap[id] = colorInfo;
+        });
+      });
+    }
+
     processedPoints.forEach((item) => {
       // Only render marker on map if it matches current search & filter criteria for high consistency
       const isSearchMatched = item.name.toLowerCase().includes(searchTerm.toLowerCase()) || item.id.toString() === searchTerm;
@@ -1389,13 +1593,18 @@ export default function App() {
       if (!isSearchMatched || !isFilterMatched) return;
 
       let markerHtml = '';
+      const routeColor = routeColorMap[item.id];
+      const isRouteMember = !!routeColor;
 
       if (item.isBlooming) {
         const remainingHours = item.remainingSecs / 3600;
         let pulseClass = "pulse-pink";
         let emoji = "🌸";
         
-        if (item.isClusterMember) {
+        if (isRouteMember) {
+          pulseClass = "pulse-amber";
+          emoji = "👑";
+        } else if (item.isClusterMember) {
           pulseClass = "pulse-amber";
           emoji = "👑";
         } else if (remainingHours > 22) {
@@ -1406,25 +1615,28 @@ export default function App() {
           emoji = "⚠️";
         }
 
-        // Highlight cluster on the map visually
-        const clusterIndicator = item.isClusterMember ? 'border-amber-400 border-solid scale-110 shadow-lg shadow-amber-500/50' : 'border-white';
+        // Highlight route membership or cluster visually
+        const clusterIndicator = isRouteMember ? 'border-solid scale-110 shadow-lg' : (item.isClusterMember ? 'border-amber-400 border-solid scale-110 shadow-lg shadow-amber-500/50' : 'border-white');
+        const customStyle = isRouteMember ? `border-color: ${routeColor.hex}; border-width: 3px;` : '';
 
         markerHtml = `
           <div class="flex flex-col items-center justify-center">
-            <div class="${pulseClass} w-7 h-7 flex items-center justify-center text-white text-[12px] shadow-md font-bold border-2 ${clusterIndicator}">
+            <div class="${pulseClass} w-7 h-7 flex items-center justify-center text-white text-[12px] shadow-md font-bold border-2 ${clusterIndicator}" style="${customStyle}">
               ${emoji}
             </div>
             <div class="bg-slate-950/90 text-white font-extrabold text-[9px] px-1.5 py-0.5 rounded-full shadow-lg mt-1 border border-pink-400 whitespace-nowrap">
-              #${item.id} ${item.name} ${item.isClusterMember ? '👑' : ''}
+              #${item.id} ${item.name} ${isRouteMember ? '👑' : (item.isClusterMember ? '👑' : '')}
             </div>
           </div>
         `;
       } else if (item.statusKey === 'pending_report') {
         const elapsedMins = Math.floor((now - new Date(item.expire!).getTime()) / 60000);
+        const clusterIndicator = isRouteMember ? 'border-solid scale-110 shadow-lg' : 'border-orange-400';
+        const customStyle = isRouteMember ? `border-color: ${routeColor.hex}; border-width: 3px;` : '';
 
         markerHtml = `
           <div class="flex flex-col items-center justify-center">
-            <div class="pulse-orange w-7 h-7 flex items-center justify-center text-white text-[12px] shadow-md font-bold border-2 border-orange-400">
+            <div class="pulse-orange w-7 h-7 flex items-center justify-center text-white text-[12px] shadow-md font-bold border-2 ${clusterIndicator}" style="${customStyle}">
               📝
             </div>
             <div class="bg-slate-950/90 text-orange-400 font-extrabold text-[9px] px-1.5 py-0.5 rounded-full shadow-lg mt-1 border border-orange-500 whitespace-nowrap animate-pulse">
@@ -1433,9 +1645,12 @@ export default function App() {
           </div>
         `;
       } else {
+        const clusterIndicator = isRouteMember ? 'border-solid scale-110' : 'border-slate-500';
+        const customStyle = isRouteMember ? `border-color: ${routeColor.hex}; border-width: 2.5px; opacity: 1;` : '';
+
         markerHtml = `
-          <div class="flex flex-col items-center justify-center opacity-60">
-            <div class="w-5 h-5 rounded-full bg-slate-600 flex items-center justify-center text-white text-[10px] shadow border border-slate-500">
+          <div class="flex flex-col items-center justify-center ${isRouteMember ? '' : 'opacity-60'}">
+            <div class="w-5 h-5 rounded-full bg-slate-600 flex items-center justify-center text-white text-[10px] shadow border ${clusterIndicator}" style="${customStyle}">
               🍃
             </div>
             <div class="bg-slate-900 text-slate-400 font-semibold text-[9px] px-1 py-0.5 rounded-full shadow-sm mt-1 border border-slate-700 whitespace-nowrap">
@@ -1454,7 +1669,7 @@ export default function App() {
 
       const marker = L.marker([item.lat, item.lng], { icon: customIcon }).addTo(mapRef.current);
       
-      let tooltipContent = `<div class="text-slate-900 p-1"><strong>#${item.id} ${item.name}</strong><br>`;
+      let tooltipContent = `<div class="text-slate-900 p-1 font-sans"><strong>#${item.id} ${item.name}</strong><br>`;
       if (item.isBlooming) {
         const h = Math.floor(item.remainingSecs / 3600);
         const m = Math.floor((item.remainingSecs % 3600) / 60);
@@ -1467,16 +1682,25 @@ export default function App() {
         } else {
           tooltipContent += `<span class="text-pink-600 font-bold">🌸 正常開花中</span><br>`;
         }
-        if (item.isClusterMember) {
+        if (isRouteMember) {
+          tooltipContent += `<span class="font-black" style="color: ${routeColor.hex}">👑 ${routeColor.name}路線點</span><br>`;
+        } else if (item.isClusterMember) {
           tooltipContent += `<span class="text-amber-600 font-black">👑 15m 精選點</span><br>`;
         }
         tooltipContent += `剩餘時間: ${h}h ${m}m ${s}s<br>枯萎時間: ${formatDateLabel(item.expire)}</div>`;
       } else if (item.statusKey === 'pending_report') {
         const elapsedMins = Math.floor((now - new Date(item.expire!).getTime()) / 60000);
         tooltipContent += `<span class="text-orange-600 font-black">📝 等待回報中</span><br>`;
+        if (isRouteMember) {
+          tooltipContent += `<span class="font-black" style="color: ${routeColor.hex}">👑 ${routeColor.name}路線點</span><br>`;
+        }
         tooltipContent += `已變回葉子: ${elapsedMins} 分鐘前</div>`;
       } else {
-        tooltipContent += `<span class="text-slate-500">🍃 葉子狀態</span></div>`;
+        tooltipContent += `<span class="text-slate-500">🍃 葉子狀態</span><br>`;
+        if (isRouteMember) {
+          tooltipContent += `<span class="font-black" style="color: ${routeColor.hex}">👑 ${routeColor.name}路線點</span><br>`;
+        }
+        tooltipContent += `</div>`;
       }
 
       marker.bindPopup(tooltipContent);
@@ -1488,46 +1712,91 @@ export default function App() {
       markersRef.current[item.id] = marker;
     });
 
-    // Clean up previous suggested spot circle & marker
-    if (suggestedSpotCircleRef.current) {
-      mapRef.current.removeLayer(suggestedSpotCircleRef.current);
-      suggestedSpotCircleRef.current = null;
-    }
-    if (suggestedSpotMarkerRef.current) {
-      mapRef.current.removeLayer(suggestedSpotMarkerRef.current);
-      suggestedSpotMarkerRef.current = null;
-    }
+    // Draw active paths or circles based on userRole
+    if (userRole === "planting") {
+      const routes = getMultiplePlantingRoutes();
+      routes.forEach((route, rIdx) => {
+        if (route.path.length === 0) return;
+        const colorInfo = ROUTE_COLORS[rIdx % ROUTE_COLORS.length];
+        const isSelected = selectedRouteIndex === rIdx;
 
-    if (selectedSuggestedSpot) {
-      // Draw 500m circle
-      suggestedSpotCircleRef.current = L.circle([selectedSuggestedSpot.lat, selectedSuggestedSpot.lng], {
-        radius: 500,
-        color: '#c084fc', // purple-400
-        fillColor: '#c084fc',
-        fillOpacity: 0.15,
-        dashArray: '6, 6',
-        weight: 2
-      }).addTo(mapRef.current);
+        const polyline = L.polyline(
+          route.path.map(p => [p.lat, p.lng]),
+          {
+            color: colorInfo.hex,
+            weight: isSelected ? 6 : 3,
+            opacity: isSelected ? 0.95 : 0.45,
+            dashArray: isSelected ? undefined : '5, 5'
+          }
+        ).addTo(mapRef.current);
 
-      // Draw custom center marker
-      const centerIcon = L.divIcon({
-        html: `
-          <div class="flex flex-col items-center justify-center">
-            <div class="w-8 h-8 rounded-full bg-purple-600 text-white flex items-center justify-center border-2 border-white shadow-xl animate-bounce">
-              🎯
-            </div>
-            <div class="bg-slate-950/95 text-purple-300 font-extrabold text-[9px] px-2 py-0.5 rounded-full border border-purple-500/50 mt-1 shadow-lg whitespace-nowrap">
-              最佳駐點 (強開 ${selectedSuggestedSpot.coveredIds.length} 花)
-            </div>
+        polyline.bindPopup(`
+          <div class="text-slate-900 font-sans p-1">
+            <strong style="color: ${colorInfo.hex}">🚗 路線 ${rIdx + 1} (${colorInfo.name})</strong><br/>
+            建議：<strong>${route.recommendedStartTime}</strong><br/>
+            花數：${route.path.length} 朵<br/>
+            時長：${Math.floor(route.totalDuration / 60)} 分 ${Math.round(route.totalDuration % 60)} 秒
           </div>
-        `,
-        className: 'custom-suggested-spot-icon',
-        iconSize: [40, 40],
-        iconAnchor: [20, 20]
+        `);
+
+        polylinesRef.current.push(polyline);
       });
-      suggestedSpotMarkerRef.current = L.marker([selectedSuggestedSpot.lat, selectedSuggestedSpot.lng], { icon: centerIcon }).addTo(mapRef.current);
+    } else if (userRole === "force_bloom") {
+      const spots = getMultipleForceBloomRoutes();
+      spots.forEach((spot, sIdx) => {
+        const colorInfo = ROUTE_COLORS[sIdx % ROUTE_COLORS.length];
+        const isSelected = selectedRouteIndex === sIdx;
+
+        // Draw 500m circle
+        const circle = L.circle([spot.lat, spot.lng], {
+          radius: 500,
+          color: colorInfo.hex,
+          fillColor: colorInfo.hex,
+          fillOpacity: isSelected ? 0.22 : 0.08,
+          dashArray: isSelected ? undefined : '6, 6',
+          weight: isSelected ? 3 : 1.5
+        }).addTo(mapRef.current);
+
+        circle.bindPopup(`
+          <div class="text-slate-900 font-sans p-1">
+            <strong style="color: ${colorInfo.hex}">🎯 駐點 ${sIdx + 1} (${colorInfo.name})</strong><br/>
+            建議：<strong>${spot.recommendedStartTime}</strong><br/>
+            覆蓋：${spot.coveredIds.length} 朵<br/>
+            時長：定點強開 30 分鐘
+          </div>
+        `);
+
+        circlesRef.current.push(circle);
+
+        // Draw custom center marker with number
+        const centerIcon = L.divIcon({
+          html: `
+            <div class="flex flex-col items-center justify-center">
+              <div class="w-7 h-7 rounded-full text-white flex items-center justify-center border-2 border-white shadow-xl ${isSelected ? 'animate-bounce' : ''}" style="background-color: ${colorInfo.hex}">
+                ${sIdx + 1}
+              </div>
+            </div>
+          `,
+          className: 'custom-suggested-spot-icon',
+          iconSize: [28, 28],
+          iconAnchor: [14, 14]
+        });
+
+        const marker = L.marker([spot.lat, spot.lng], { icon: centerIcon }).addTo(mapRef.current);
+        marker.bindPopup(`
+          <div class="text-slate-900 font-sans p-1">
+            <strong style="color: ${colorInfo.hex}">🎯 駐點 ${sIdx + 1} (${colorInfo.name})</strong><br/>
+            建議：<strong>${spot.recommendedStartTime}</strong><br/>
+            覆蓋：${spot.coveredIds.length} 朵<br/>
+            時長：定點強開 30 分鐘
+          </div>
+        `);
+
+        circlesRef.current.push(marker);
+      });
     }
-  }, [landmarks, statusFilter, searchTerm, selectedSuggestedSpot, mapReady, userRole]);
+
+  }, [landmarks, statusFilter, searchTerm, mapReady, userRole, selectedRouteIndex, plantingSpeed, plantingTarget, forceBloomTarget]);
 
   // Focus table row
   const highlightRowInTable = (id: number) => {
@@ -2157,16 +2426,6 @@ export default function App() {
                   {recommendedPlantingTime}
                 </span>
               </div>
-              <div className="h-4 w-px bg-slate-800" />
-              <label className="flex items-center gap-1 cursor-pointer text-slate-300 select-none font-bold hover:text-pink-400 transition">
-                <input 
-                  type="checkbox" 
-                  checked={isClusterCheckbox} 
-                  onChange={(e) => handleClusterCheckboxChange(e.target.checked)}
-                  className="accent-pink-500 w-3.5 h-3.5 rounded border-slate-700 focus:ring-pink-500"
-                />
-                <span>最少5花點</span>
-              </label>
               <div className="h-4 w-px bg-slate-800" />
               <button
                 onClick={handleExportSelectedRoute}
@@ -3156,10 +3415,10 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Compute and display */}
+                {/* Compute and display multiple planting routes */}
                 {(() => {
-                  const routeData = getPlantingRouteData();
-                  if (routeData.path.length === 0) {
+                  const routes = getMultiplePlantingRoutes();
+                  if (routes.length === 0) {
                     return (
                       <div className="py-6 text-center text-xs text-slate-500 bg-slate-950/40 rounded-2xl border border-slate-800">
                         ⚠️ 當前無可規劃的目標花卉點位！
@@ -3168,93 +3427,123 @@ export default function App() {
                   }
 
                   return (
-                    <div className="space-y-3">
-                      {/* Summary card */}
-                      <div className="grid grid-cols-3 gap-2 bg-slate-950/60 p-3 rounded-2xl border border-slate-800">
-                        <div className="text-center">
-                          <p className="text-[9px] text-slate-500">預計可種花</p>
-                          <p className="text-xs font-black text-pink-400 font-mono mt-0.5">{routeData.path.length} 朵</p>
-                        </div>
-                        <div className="text-center border-x border-slate-800">
-                          <p className="text-[9px] text-slate-500">總移動距離</p>
-                          <p className="text-xs font-black text-slate-200 font-mono mt-0.5">
-                            {routeData.totalDistance >= 1000 
-                              ? `${(routeData.totalDistance / 1000).toFixed(2)} km` 
-                              : `${Math.round(routeData.totalDistance)} m`}
-                          </p>
-                        </div>
-                        <div className="text-center">
-                          <p className="text-[9px] text-slate-500">預計總耗時</p>
-                          <p className="text-xs font-black text-purple-400 font-mono mt-0.5">
-                            {Math.floor(routeData.totalDuration / 60)} 分 {Math.round(routeData.totalDuration % 60)} 秒
-                          </p>
-                        </div>
-                      </div>
+                    <div className="space-y-4">
+                      <p className="text-[10px] text-slate-400 leading-relaxed bg-slate-950/40 p-2.5 rounded-xl border border-slate-800">
+                        💡 <strong>連續種花原理：</strong> 系統已自動將您欲種植的點位，以每條 5 花點（考慮 6 分鐘種花 + 移動時間與大花存活時間）為基準分組，並推薦最優順序與時間。點選以下路線卡片，可切換地圖高亮該路線！
+                      </p>
 
-                      {/* Timeline flow */}
-                      <div className="space-y-1 bg-slate-950/40 p-3 rounded-2xl border border-slate-850 max-h-[150px] overflow-y-auto font-sans">
-                        <p className="text-[9px] text-slate-500 font-bold mb-2">🧭 最優連續種植順序行程：</p>
-                        {routeData.steps.map((step, idx) => {
-                          const hNum = step.landmark.id;
-                          const name = step.landmark.name;
-                          if (step.type === "start") {
-                            return (
-                              <div key={idx} className="flex items-start gap-2 text-[11px] py-1">
-                                <span className="bg-emerald-500/20 text-emerald-400 w-4 h-4 rounded-full flex items-center justify-center font-bold text-[8px] shrink-0 mt-0.5">起</span>
-                                <div>
-                                  <span className="font-bold text-slate-200">#{hNum} {name}</span>
-                                  <span className="text-[9px] text-slate-500 ml-1.5">(停留 6m 種花)</span>
+                      <div className="space-y-3 max-h-[350px] overflow-y-auto pr-1">
+                        {routes.map((route, rIdx) => {
+                          const colorInfo = ROUTE_COLORS[rIdx % ROUTE_COLORS.length];
+                          const isSelected = selectedRouteIndex === rIdx;
+                          
+                          return (
+                            <div
+                              key={rIdx}
+                              onClick={() => {
+                                setSelectedRouteIndex(rIdx);
+                                if (mapRef.current && route.path.length > 0) {
+                                  mapRef.current.setView([route.path[0].lat, route.path[0].lng], 16);
+                                }
+                              }}
+                              className={`p-3.5 rounded-2xl border cursor-pointer transition duration-150 relative ${
+                                isSelected 
+                                  ? "bg-slate-900 border-2" 
+                                  : "bg-slate-950/60 border-slate-800/80 hover:border-slate-700"
+                              }`}
+                              style={isSelected ? { borderColor: colorInfo.hex } : {}}
+                            >
+                              {/* Color Badge Header */}
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: colorInfo.hex }} />
+                                  <span className="text-xs font-black text-slate-100">
+                                    路線 {rIdx + 1} ({colorInfo.name})
+                                  </span>
+                                </div>
+                                <span className="text-[11px] font-extrabold text-pink-400">
+                                  🌸 {route.path.length} 朵大花
+                                </span>
+                              </div>
+
+                              {/* Info indicators */}
+                              <div className="grid grid-cols-2 gap-2 text-[10px] text-slate-300 mt-2">
+                                <div className="bg-slate-950/50 p-2 rounded-xl border border-slate-800/40">
+                                  <p className="text-slate-500 text-[9px]">建議出發時間</p>
+                                  <p className="font-bold text-emerald-400 mt-0.5">{route.recommendedStartTime}</p>
+                                </div>
+                                <div className="bg-slate-950/50 p-2 rounded-xl border border-slate-800/40">
+                                  <p className="text-slate-500 text-[9px]">總移動時長</p>
+                                  <p className="font-bold text-purple-400 mt-0.5">
+                                    {Math.floor(route.totalDuration / 60)} 分 {Math.round(route.totalDuration % 60)} 秒
+                                  </p>
                                 </div>
                               </div>
-                            );
-                          } else {
-                            const distText = step.distance! >= 1000 
-                              ? `${(step.distance! / 1000).toFixed(2)}km` 
-                              : `${Math.round(step.distance!)}m`;
-                            const timeText = step.travelTime! >= 60 
-                              ? `${Math.floor(step.travelTime! / 60)}m${Math.round(step.travelTime! % 60)}s` 
-                              : `${Math.round(step.travelTime!)}s`;
-                            return (
-                              <div key={idx} className="space-y-1">
-                                <div className="pl-2.5 border-l border-dashed border-slate-800 py-0.5 flex items-center gap-1.5 text-[9px] text-slate-500 font-mono">
-                                  <i className="fa-solid fa-arrow-down-long text-[8px] text-purple-500/40"></i>
-                                  <span>移至下站 {distText} (約 {timeText})</span>
+
+                              {/* Timeline detail inside selected item */}
+                              {isSelected && (
+                                <div className="mt-3 space-y-1 bg-slate-950/80 p-2.5 rounded-xl border border-slate-850/60 font-sans text-[10px]">
+                                  <p className="text-[9px] text-slate-500 font-bold mb-1.5">🧭 路線詳細步驟：</p>
+                                  {route.steps.map((step, idx) => {
+                                    const hNum = step.landmark.id;
+                                    const name = step.landmark.name;
+                                    if (step.type === "start") {
+                                      return (
+                                        <div key={idx} className="flex items-start gap-1.5 py-0.5">
+                                          <span className="bg-emerald-500/20 text-emerald-400 w-3.5 h-3.5 rounded-full flex items-center justify-center font-bold text-[8px] shrink-0 mt-0.5">起</span>
+                                          <span className="font-bold text-slate-200">#{hNum} {name}</span>
+                                        </div>
+                                      );
+                                    } else {
+                                      const distText = step.distance! >= 1000 
+                                        ? `${(step.distance! / 1000).toFixed(2)}km` 
+                                        : `${Math.round(step.distance!)}m`;
+                                      return (
+                                        <div key={idx} className="space-y-0.5">
+                                          <div className="pl-2 border-l border-dashed border-slate-800 text-[9px] text-slate-500">
+                                            ↓ 下站 {distText}
+                                          </div>
+                                          <div className="flex items-start gap-1.5 py-0.5">
+                                            <span className="bg-purple-500/20 text-purple-400 w-3.5 h-3.5 rounded-full flex items-center justify-center font-bold text-[8px] shrink-0 mt-0.5">{idx + 1}</span>
+                                            <span className="font-bold text-slate-200">#{hNum} {name}</span>
+                                          </div>
+                                        </div>
+                                      );
+                                    }
+                                  })}
                                 </div>
-                                <div className="flex items-start gap-2 text-[11px] py-1">
-                                  <span className="bg-purple-500/20 text-purple-400 w-4 h-4 rounded-full flex items-center justify-center font-bold text-[8px] shrink-0 mt-0.5">{idx + 1}</span>
-                                  <div>
-                                    <span className="font-bold text-slate-200">#{hNum} {name}</span>
-                                    <span className="text-[9px] text-slate-500 ml-1.5">(停留 6m 種花)</span>
-                                  </div>
-                                </div>
+                              )}
+
+                              {/* Direct Google Maps Navigation button matching color */}
+                              <div className="mt-3">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation(); // prevent card re-select trigger
+                                    const origin = `${route.path[0].lat},${route.path[0].lng}`;
+                                    const destination = `${route.path[route.path.length - 1].lat},${route.path[route.path.length - 1].lng}`;
+                                    let waypoints = "";
+                                    if (route.path.length > 2) {
+                                      const intermediate = route.path.slice(1, route.path.length - 1);
+                                      waypoints = intermediate.map(p => `${p.lat},${p.lng}`).join("|");
+                                    }
+                                    let gUrl = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}`;
+                                    if (waypoints) {
+                                      gUrl += `&waypoints=${encodeURIComponent(waypoints)}`;
+                                    }
+                                    gUrl += `&travelmode=${plantingSpeed === 5 ? "walking" : "bicycling"}`;
+                                    window.open(gUrl, "_blank");
+                                  }}
+                                  className="w-full text-white font-extrabold py-2.5 px-3 rounded-xl text-[11px] transition shadow-md flex items-center justify-center gap-1.5 hover:opacity-90 active:scale-95"
+                                  style={{ backgroundColor: colorInfo.hex }}
+                                >
+                                  <i className="fa-solid fa-map-location-dot"></i>
+                                  <span>開啟 {colorInfo.name} 路線 Google Maps 連續種花導航</span>
+                                </button>
                               </div>
-                            );
-                          }
+                            </div>
+                          );
                         })}
                       </div>
-
-                      {/* Google map action */}
-                      <button
-                        onClick={() => {
-                          const origin = `${routeData.path[0].lat},${routeData.path[0].lng}`;
-                          const destination = `${routeData.path[routeData.path.length - 1].lat},${routeData.path[routeData.path.length - 1].lng}`;
-                          let waypoints = "";
-                          if (routeData.path.length > 2) {
-                            const intermediate = routeData.path.slice(1, routeData.path.length - 1);
-                            waypoints = intermediate.map(p => `${p.lat},${p.lng}`).join("|");
-                          }
-                          let gUrl = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}`;
-                          if (waypoints) {
-                            gUrl += `&waypoints=${encodeURIComponent(waypoints)}`;
-                          }
-                          gUrl += `&travelmode=${plantingSpeed === 5 ? "walking" : "bicycling"}`;
-                          window.open(gUrl, "_blank");
-                        }}
-                        className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-extrabold p-3 rounded-2xl text-xs transition shadow-lg flex items-center justify-center gap-2"
-                      >
-                        <i className="fa-solid fa-map-location-dot text-sm"></i>
-                        <span>開啟 Google Maps 連續種花導航</span>
-                      </button>
                     </div>
                   );
                 })()}
@@ -3296,77 +3585,79 @@ export default function App() {
 
                 {/* List of recommended spots */}
                 {(() => {
-                  const spots = getSuggestedParkingSpots();
+                  const spots = getMultipleForceBloomRoutes();
                   if (spots.length === 0) {
                     return (
                       <div className="py-6 text-center text-xs text-slate-500 bg-slate-950/40 rounded-2xl border border-slate-800">
-                        ⚠️ 當前無可規劃的強開推薦駐點！
+                        ⚠️ 當前無可規劃的強開推薦駐點！(強開最少需 5 花點)
                       </div>
                     );
                   }
 
                   return (
-                    <div className="space-y-3">
+                    <div className="space-y-4">
                       <p className="text-[10px] text-slate-400 leading-relaxed bg-slate-950/40 p-2.5 rounded-xl border border-slate-800">
-                        💡 <strong>強開駐點原理：</strong> 強開不用等待時間（距離500米感應範圍）。以下駐點經最優中心化（Centroid）精算，您可以停駐在此點，同時感應強開圓圈內的所有大花點位！
+                        💡 <strong>強開駐點原理：</strong> 以下定點駐點經 500m 半徑圓心精算，滿足最少 5 花點基準。點選下方駐點，地圖會立即高亮雷達圈！點按開啟 Google Maps 會直接導航至該定點。
                       </p>
 
-                      <div className="space-y-2 max-h-[190px] overflow-y-auto pr-1">
+                      <div className="space-y-3 max-h-[350px] overflow-y-auto pr-1">
                         {spots.map((spot, index) => {
-                          const isSelected = selectedSuggestedSpot && selectedSuggestedSpot.lat === spot.lat && selectedSuggestedSpot.lng === spot.lng;
+                          const colorInfo = ROUTE_COLORS[index % ROUTE_COLORS.length];
+                          const isSelected = selectedRouteIndex === index;
+                          
                           return (
                             <div 
-                              key={index} 
-                              className={`p-3 rounded-2xl border transition duration-150 ${
+                              key={index}
+                              onClick={() => {
+                                setSelectedRouteIndex(index);
+                                setSelectedSuggestedSpot({ lat: spot.lat, lng: spot.lng, coveredIds: spot.coveredIds });
+                                if (mapRef.current) {
+                                  mapRef.current.setView([spot.lat, spot.lng], 16);
+                                }
+                              }}
+                              className={`p-3.5 rounded-2xl border cursor-pointer transition duration-150 relative ${
                                 isSelected 
-                                  ? "bg-purple-950/40 border-purple-500" 
+                                  ? "bg-slate-900 border-2" 
                                   : "bg-slate-950/60 border-slate-800/80 hover:border-slate-700"
                               }`}
+                              style={isSelected ? { borderColor: colorInfo.hex } : {}}
                             >
-                              <div className="flex items-center justify-between mb-1.5">
-                                <span className="bg-purple-900 text-purple-200 text-[9px] font-black px-2 py-0.5 rounded-full">
-                                  🎯 最佳駐點 #{index + 1}
-                                </span>
-                                <span className="text-pink-400 font-extrabold text-[11px]">
-                                  ⚡ 可強開 {spot.coveredIds.length} 花
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: colorInfo.hex }} />
+                                  <span className="text-xs font-black text-slate-100">
+                                    定點強開駐點 {index + 1} ({colorInfo.name})
+                                  </span>
+                                </div>
+                                <span className="text-[11px] font-extrabold text-pink-400">
+                                  ⚡ 可強開 {spot.coveredIds.length} 朵花
                                 </span>
                               </div>
                               
                               <div className="text-[10px] text-slate-300 space-y-1.5 my-2">
                                 <div className="flex flex-wrap gap-1">
                                   {spot.coveredNames.map((name, nIdx) => (
-                                    <span key={nIdx} className="bg-slate-900/80 px-1.5 py-0.5 rounded border border-slate-800/60 text-slate-400 text-[9px] whitespace-nowrap">
+                                    <span key={nIdx} className="bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800 text-slate-400 text-[9px] whitespace-nowrap">
                                       #{spot.coveredIds[nIdx]} {name}
                                     </span>
                                   ))}
                                 </div>
-                                <p className="text-[9px] text-slate-500 font-mono">
-                                  GPS: {spot.lat.toFixed(6)}, {spot.lng.toFixed(6)} (最遠花 {Math.round(spot.maxDist)}m)
-                                </p>
+                                <div className="grid grid-cols-2 gap-2 mt-2">
+                                  <div className="bg-slate-950/50 p-2 rounded-xl border border-slate-800/40">
+                                    <p className="text-slate-500 text-[9px]">建議強開時間</p>
+                                    <p className="font-bold text-amber-400 mt-0.5">{spot.recommendedStartTime}</p>
+                                  </div>
+                                  <div className="bg-slate-950/50 p-2 rounded-xl border border-slate-800/40">
+                                    <p className="text-slate-500 text-[9px]">最遠大花距離</p>
+                                    <p className="font-bold text-slate-300 mt-0.5">{Math.round(spot.maxDist)}m</p>
+                                  </div>
+                                </div>
                               </div>
 
-                              <div className="grid grid-cols-3 gap-1.5 pt-2 border-t border-slate-900">
+                              <div className="grid grid-cols-2 gap-2 mt-3 pt-2.5 border-t border-slate-900/60">
                                 <button
-                                  onClick={() => {
-                                    setSelectedSuggestedSpot({ lat: spot.lat, lng: spot.lng, coveredIds: spot.coveredIds });
-                                    if (mapRef.current) {
-                                      mapRef.current.setView([spot.lat, spot.lng], 16);
-                                    }
-                                    showToast(`🎯 已在地圖上畫出強開駐點 #${index + 1} 與 500m 範圍！`);
-                                    playSynthChime();
-                                  }}
-                                  className={`py-1 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition ${
-                                    isSelected 
-                                      ? "bg-purple-600 text-white" 
-                                      : "bg-slate-900 hover:bg-slate-800 text-purple-400 border border-purple-500/10"
-                                  }`}
-                                >
-                                  <i className="fa-solid fa-location-crosshairs"></i>
-                                  <span>{isSelected ? "已設雷達" : "雷達範圍"}</span>
-                                </button>
-                                
-                                <button
-                                  onClick={() => {
+                                  onClick={(e) => {
+                                    e.stopPropagation();
                                     const coordinateString = `${spot.lat.toFixed(7)}, ${spot.lng.toFixed(7)}`;
                                     const tempTextarea = document.createElement('textarea');
                                     tempTextarea.value = coordinateString;
@@ -3376,21 +3667,23 @@ export default function App() {
                                     document.body.removeChild(tempTextarea);
                                     showToast(`📋 駐點座標已複製：${coordinateString}`);
                                   }}
-                                  className="bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 py-1 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition"
+                                  className="bg-slate-950 hover:bg-slate-900 text-slate-300 border border-slate-800 py-2 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 transition"
                                 >
                                   <i className="fa-solid fa-copy"></i>
                                   <span>複製座標</span>
                                 </button>
 
                                 <button
-                                  onClick={() => {
+                                  onClick={(e) => {
+                                    e.stopPropagation();
                                     const gUrl = `https://www.google.com/maps/dir/?api=1&destination=${spot.lat},${spot.lng}`;
                                     window.open(gUrl, "_blank");
                                   }}
-                                  className="bg-slate-900 hover:bg-slate-800 text-emerald-400 border border-emerald-500/10 py-1 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition"
+                                  className="text-white font-extrabold py-2.5 px-3 rounded-xl text-[11px] transition shadow-md flex items-center justify-center gap-1.5 hover:opacity-90 active:scale-95"
+                                  style={{ backgroundColor: colorInfo.hex }}
                                 >
                                   <i className="fa-solid fa-location-arrow"></i>
-                                  <span>導航駐點</span>
+                                  <span>開啟 Google Maps 導航</span>
                                 </button>
                               </div>
                             </div>
