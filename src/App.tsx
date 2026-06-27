@@ -842,57 +842,146 @@ export default function App() {
     }))
     .sort((a, b) => a.expireTime - b.expireTime);
 
-  // 15m Cluster calculation algorithm
   const clusterIds = new Set<number>();
-  let earliestClusterStartTime: number | null = null;
+  let recommendedPlantingTime = "無建議時間";
 
-  for (let i = 0; i < bloomingFlowers.length; i++) {
-    const fStart = bloomingFlowers[i];
-    const windowEnd = fStart.expireTime + 15 * 60 * 1000; // 15 mins window
-    
-    const inWindow = bloomingFlowers.filter(f => f.expireTime >= fStart.expireTime && f.expireTime <= windowEnd);
-    if (inWindow.length >= 5) {
-      inWindow.forEach(f => clusterIds.add(f.id));
-      if (earliestClusterStartTime === null) {
-        earliestClusterStartTime = fStart.expireTime;
+  if (userRole === "planting") {
+    // Planting mode: find the earliest starting time S for sequentially planting at least 5 flowers.
+    // Include all region points, treating leaves as expired at `now`.
+    const allRegionPointsWithTime = regionPoints.map(l => ({
+      ...l,
+      expireTime: l.expire ? new Date(l.expire).getTime() : now
+    })).sort((a, b) => a.expireTime - b.expireTime);
+
+    if (allRegionPointsWithTime.length < 5) {
+      recommendedPlantingTime = "本區花點不足 5 朵";
+    } else {
+      const getBestStartTimeFor5 = (flowers: typeof allRegionPointsWithTime) => {
+        // Generate all 120 permutations of 5 elements
+        const perms: number[][] = [];
+        const generatePerms = (current: number[], remaining: number[]) => {
+          if (remaining.length === 0) {
+            perms.push(current);
+            return;
+          }
+          for (let i = 0; i < remaining.length; i++) {
+            generatePerms([...current, remaining[i]], remaining.filter((_, idx) => idx !== i));
+          }
+        };
+        generatePerms([], [0, 1, 2, 3, 4]);
+
+        let minSStart = Infinity;
+        const speedMps = (plantingSpeed * 1000) / 3600;
+
+        for (const perm of perms) {
+          let currentSRequired = -Infinity;
+          let accumulatedTravelTime = 0;
+          for (let j = 0; j < 5; j++) {
+            const currFlower = flowers[perm[j]];
+            const expireTime = currFlower.expireTime;
+            
+            if (j > 0) {
+              const prevFlower = flowers[perm[j - 1]];
+              const dist = getDistance(prevFlower.lat, prevFlower.lng, currFlower.lat, currFlower.lng);
+              accumulatedTravelTime += dist / speedMps;
+            }
+            
+            const plantingDelaySec = j * 6 * 60; // 6 mins per flower in seconds
+            const delayMs = (plantingDelaySec + accumulatedTravelTime) * 1000;
+            const sRequiredForThisFlower = expireTime - delayMs;
+            if (sRequiredForThisFlower > currentSRequired) {
+              currentSRequired = sRequiredForThisFlower;
+            }
+          }
+
+          if (currentSRequired < minSStart) {
+            minSStart = currentSRequired;
+          }
+        }
+
+        return minSStart;
+      };
+
+      let bestStartTime = Infinity;
+      let bestGroup: typeof allRegionPointsWithTime = [];
+
+      // Loop over all contiguous groups of 5 in sorted order
+      for (let i = 0; i <= allRegionPointsWithTime.length - 5; i++) {
+        const group = allRegionPointsWithTime.slice(i, i + 5);
+        const minSStart = getBestStartTimeFor5(group);
+        if (minSStart < bestStartTime) {
+          bestStartTime = minSStart;
+          bestGroup = group;
+        }
+      }
+
+      // Populate clusterIds with the best group's IDs
+      bestGroup.forEach(f => clusterIds.add(f.id));
+
+      if (bestStartTime <= now) {
+        recommendedPlantingTime = "可立即出發 (滿足5花點)";
+      } else {
+        const dateObj = new Date(bestStartTime);
+        const timeStr = `${dateObj.getHours().toString().padStart(2, '0')}:${dateObj.getMinutes().toString().padStart(2, '0')}`;
+        recommendedPlantingTime = `${timeStr} (5花點同種最佳時間)`;
       }
     }
+  } else if (userRole === "force_bloom") {
+    // Force bloom mode: find the earliest time we have at least 5 leaves in a 500m radius circle.
+    let bestForceBloomTime = Infinity;
+    let bestCircleFlowers: typeof regionPoints = [];
+
+    for (const seed of regionPoints) {
+      // Find all region points within 500m of seed
+      const nearby = regionPoints.filter(t => getDistance(seed.lat, seed.lng, t.lat, t.lng) <= 500);
+      if (nearby.length >= 5) {
+        // Count how many are currently leaves
+        const currentLeaves = nearby.filter(f => !f.expire || new Date(f.expire).getTime() <= now).length;
+        if (currentLeaves >= 5) {
+          bestForceBloomTime = now;
+          bestCircleFlowers = nearby;
+          break; // Immediate is best, we can stop searching
+        } else {
+          // Sort blooming flowers in this circle by expire time
+          const blooming = nearby
+            .filter(f => f.expire && new Date(f.expire).getTime() > now)
+            .map(f => ({ ...f, expireTime: new Date(f.expire!).getTime() }))
+            .sort((a, b) => a.expireTime - b.expireTime);
+
+          const needed = 5 - currentLeaves;
+          if (needed <= blooming.length) {
+            const earliestTimeForThisCircle = blooming[needed - 1].expireTime;
+            if (earliestTimeForThisCircle < bestForceBloomTime) {
+              bestForceBloomTime = earliestTimeForThisCircle;
+              bestCircleFlowers = nearby;
+            }
+          }
+        }
+      }
+    }
+
+    // Populate clusterIds with flowers in the best force-bloom circle
+    bestCircleFlowers.forEach(f => clusterIds.add(f.id));
+
+    if (bestForceBloomTime === Infinity) {
+      recommendedPlantingTime = "無符合 5 花點之駐點";
+    } else if (bestForceBloomTime <= now) {
+      recommendedPlantingTime = "可立即強開 (滿足5花點)";
+    } else {
+      const dateObj = new Date(bestForceBloomTime);
+      const timeStr = `${dateObj.getHours().toString().padStart(2, '0')}:${dateObj.getMinutes().toString().padStart(2, '0')}`;
+      recommendedPlantingTime = `${timeStr} (駐點滿5花時間)`;
+    }
   }
 
-  // Calculate recommended planting time based on checkbox state and cluster availability
-  let recommendedPlantingTime = "無建議時間";
   const isClusterCheckbox = statusFilter === "cluster";
-
-  if (isClusterCheckbox) {
-    if (earliestClusterStartTime !== null) {
-      const dateObj = new Date(earliestClusterStartTime);
-      const timeStr = `${dateObj.getHours().toString().padStart(2, '0')}:${dateObj.getMinutes().toString().padStart(2, '0')}`;
-      
-      // Count cluster size in earliest cluster window
-      const earliestClusterEnd = earliestClusterStartTime + 15 * 60 * 1000;
-      const clusterCount = bloomingFlowers.filter(f => f.expireTime >= earliestClusterStartTime! && f.expireTime <= earliestClusterEnd).length;
-      
-      recommendedPlantingTime = `${timeStr} (${clusterCount}朵 👑精選)`;
-    } else {
-      recommendedPlantingTime = "無符合之精選";
-    }
-  } else {
-    // Standard recommended time: earliest blooming flower expiring
-    if (bloomingFlowers.length > 0) {
-      const dateObj = new Date(bloomingFlowers[0].expireTime);
-      const timeStr = `${dateObj.getHours().toString().padStart(2, '0')}:${dateObj.getMinutes().toString().padStart(2, '0')}`;
-      recommendedPlantingTime = `${timeStr} (單花將枯)`;
-    } else {
-      recommendedPlantingTime = "隨時 (皆為葉子)";
-    }
-  }
 
   const handleClusterCheckboxChange = (checked: boolean) => {
     setStatusFilter(checked ? "cluster" : "all");
   };
 
   const skipNavGeolocation = () => {
-    const activeClusterPoints = processedPoints.filter(p => p.region === activeRegion && p.isBlooming && p.isClusterMember);
+    const activeClusterPoints = processedPoints.filter(p => p.region === activeRegion && p.isClusterMember);
     if (activeClusterPoints.length === 0) return;
 
     const path = [...activeClusterPoints].sort((a, b) => a.id - b.id);
@@ -1074,7 +1163,7 @@ export default function App() {
 
   const handleExportSelectedRoute = () => {
     // 1. Get all active cluster/featured points
-    const activeClusterPoints = processedPoints.filter(p => p.region === activeRegion && p.isBlooming && p.isClusterMember);
+    const activeClusterPoints = processedPoints.filter(p => p.region === activeRegion && p.isClusterMember);
     
     if (activeClusterPoints.length === 0) {
       showToast("⚠️ 目前無精選點位（最少5花點內之點位）！");
@@ -1239,7 +1328,7 @@ export default function App() {
     } else if (statusFilter === 'pending_report') {
       matchesStatus = (item.statusKey === 'pending_report');
     } else if (statusFilter === 'cluster') {
-      matchesStatus = item.isBlooming && item.isClusterMember;
+      matchesStatus = item.isClusterMember;
     }
 
     return matchesSearch && matchesStatus;
@@ -1295,7 +1384,7 @@ export default function App() {
       else if (statusFilter === 'dying_only') isFilterMatched = (item.statusKey === 'dying');
       else if (statusFilter === 'leaf') isFilterMatched = (item.statusKey === 'leaf');
       else if (statusFilter === 'pending_report') isFilterMatched = (item.statusKey === 'pending_report');
-      else if (statusFilter === 'cluster') isFilterMatched = item.isBlooming && item.isClusterMember;
+      else if (statusFilter === 'cluster') isFilterMatched = item.isClusterMember;
 
       if (!isSearchMatched || !isFilterMatched) return;
 
@@ -2060,7 +2149,10 @@ export default function App() {
             {/* Planting recommendation & settings bar */}
             <div className="flex flex-wrap items-center gap-2 bg-slate-950/70 p-2 rounded-2xl border border-purple-500/30 text-[11px] sm:text-xs shadow-inner w-full sm:w-auto">
               <div className="flex items-center gap-1.5 text-pink-400 font-bold">
-                <span className="flex items-center gap-1"><i className="fa-solid fa-seedling text-emerald-400"></i> 建議：</span>
+                <span className="flex items-center gap-1">
+                  <i className={userRole === "planting" ? "fa-solid fa-seedling text-emerald-400" : "fa-solid fa-circle-dot text-purple-400"}></i> 
+                  {userRole === "planting" ? "建議種花時間：" : "建議強開時間："}
+                </span>
                 <span className="text-white font-black bg-purple-950 px-2 py-0.5 rounded-lg border border-purple-500/30">
                   {recommendedPlantingTime}
                 </span>
