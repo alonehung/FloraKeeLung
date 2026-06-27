@@ -66,7 +66,67 @@ const extractSheetId = (input: string): string => {
   return trimmed;
 };
 
-const fetchSheetViaJSONP = (sheetId: string): Promise<Landmark[]> => {
+const fetchSheetViaJSONP = async (sheetId: string): Promise<Landmark[]> => {
+  // Try fetching via standard CORS fetch first to avoid CSP blocking of script tags
+  try {
+    const response = await fetch(`https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq`);
+    if (response.ok) {
+      const text = await response.text();
+      const match = text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\);/);
+      if (match && match[1]) {
+        const data = JSON.parse(match[1]);
+        if (data && data.table && data.table.rows) {
+          const loadedLandmarks: Landmark[] = [];
+          const rows = data.table.rows;
+          let startIndex = 0;
+          if (rows.length > 0 && rows[0] && rows[0].c && rows[0].c[0]) {
+            const firstCellVal = String(rows[0].c[0].v || "").trim();
+            if (firstCellVal !== "" && isNaN(Number(firstCellVal))) {
+              startIndex = 1;
+            }
+          }
+          for (let i = startIndex; i < rows.length; i++) {
+            const row = rows[i];
+            if (!row || !row.c) continue;
+            
+            const idVal = row.c[0]?.v;
+            const nameVal = row.c[1]?.v;
+            const latVal = row.c[2]?.v;
+            const lngVal = row.c[3]?.v;
+            const expireVal = row.c[4]?.v;
+            const regionVal = row.c[5]?.v;
+
+            if (idVal === undefined || idVal === null) continue;
+            
+            const id = typeof idVal === "number" ? idVal : parseInt(String(idVal).trim(), 10);
+            const name = nameVal !== undefined && nameVal !== null ? String(nameVal).trim() : `大花 ${id}`;
+            const lat = typeof latVal === "number" ? latVal : parseFloat(String(latVal));
+            const lng = typeof lngVal === "number" ? lngVal : parseFloat(String(lngVal));
+            const expire = expireVal !== undefined && expireVal !== null ? String(expireVal).trim() : null;
+            const region = regionVal !== undefined && regionVal !== null ? String(regionVal).trim() : "keelung";
+
+            if (isNaN(id) || isNaN(lat) || isNaN(lng)) continue;
+
+            loadedLandmarks.push({
+              id,
+              name,
+              lat,
+              lng,
+              expire: (expire === "null" || expire === "") ? null : expire,
+              region
+            });
+          }
+          if (loadedLandmarks.length > 0) {
+            return loadedLandmarks;
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("Standard fetch to gviz/tq failed, falling back to JSONP script tag approach", err);
+  }
+
+  // Fallback to JSONP script tag injection
   return new Promise((resolve, reject) => {
     const callbackName = `gviz_callback_${Math.round(Math.random() * 1000000)}`;
     const script = document.createElement("script");
@@ -2634,17 +2694,18 @@ export default function App() {
             </div>
 
             {/* Planting recommendation & settings bar */}
-            <div className="flex flex-wrap items-center gap-2 bg-slate-950/70 p-2 rounded-2xl border border-purple-500/30 text-[11px] sm:text-xs shadow-inner w-full sm:w-auto">
-              <div className="flex items-center gap-1.5 text-pink-400 font-bold">
+            <div className="flex justify-between sm:justify-start items-center gap-2 bg-slate-950/70 p-1.5 sm:p-2 rounded-2xl border border-purple-500/30 text-[11px] sm:text-xs shadow-inner w-full sm:w-auto">
+              <div className="flex items-center gap-1.5 text-pink-400 font-bold shrink-0">
                 <span className="flex items-center gap-1">
                   <i className={userRole === "planting" ? "fa-solid fa-seedling text-emerald-400" : userRole === "force_bloom" ? "fa-solid fa-circle-dot text-purple-400" : "fa-solid fa-crown text-amber-400"}></i> 
-                  {userRole === "planting" ? "建議種花時間：" : userRole === "force_bloom" ? "建議強開時間：" : "建議伸手黨時間："}
+                  <span className="xs:inline hidden">{userRole === "planting" ? "建議種花時間：" : userRole === "force_bloom" ? "建議強開時間：" : "建議伸手黨時間："}</span>
+                  <span className="xs:hidden inline">{userRole === "planting" ? "建議：" : userRole === "force_bloom" ? "建議：" : "建議："}</span>
                 </span>
-                <span className="text-white font-black bg-purple-950 px-2 py-0.5 rounded-lg border border-purple-500/30">
+                <span className="text-white font-black bg-purple-950 px-2 py-0.5 rounded-lg border border-purple-500/30 text-[10px] sm:text-xs">
                   {recommendedPlantingTime}
                 </span>
               </div>
-              <div className="h-4 w-px bg-slate-800" />
+              <div className="hidden sm:block h-4 w-px bg-slate-800" />
               <button
                 onClick={() => {
                   setSelectedSuggestedSpot(null);
@@ -2656,7 +2717,7 @@ export default function App() {
                   setShowNavModal(true);
                   playSynthChime();
                 }}
-                className="bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white font-extrabold px-3 py-1 rounded-xl transition active:scale-95 flex items-center gap-1.5 text-[10px] sm:text-[11px] shadow-md border border-pink-400/20"
+                className="w-1/2 sm:w-auto bg-gradient-to-r from-pink-500 via-purple-600 to-indigo-600 hover:from-pink-600 hover:to-indigo-700 text-white font-black px-4 py-2.5 sm:px-3.5 sm:py-1.5 rounded-xl transition active:scale-95 flex items-center justify-center gap-1.5 text-xs sm:text-[11px] md:text-xs shadow-lg border border-pink-400/30 ring-2 ring-purple-500/10 shrink-0"
               >
                 <i className="fa-solid fa-compass"></i> 路線/強開駐點規劃
               </button>
