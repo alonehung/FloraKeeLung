@@ -1148,6 +1148,7 @@ export default function App() {
         landmark: typeof targets[0];
         distance?: number;
         travelTime?: number;
+        arrivalTimeMs?: number;
       }[];
       recommendedStartTime: string;
       startTimeMs: number;
@@ -1215,6 +1216,7 @@ export default function App() {
         landmark: typeof targets[0];
         distance?: number;
         travelTime?: number;
+        arrivalTimeMs?: number;
       }[] = [];
 
       steps.push({
@@ -1285,6 +1287,16 @@ export default function App() {
             const dateObj = new Date(earliestValidS);
             const dateStr = `${(dateObj.getMonth() + 1).toString().padStart(2, '0')}/${dateObj.getDate().toString().padStart(2, '0')}`;
             recommendedStartTime = `${dateStr} ${dateObj.getHours().toString().padStart(2, '0')}:${dateObj.getMinutes().toString().padStart(2, '0')} 出發`;
+          }
+
+          // Compute arrivalTimeMs for each step based on the decided startTimeMs
+          let accumulatedTime = 0;
+          for (let j = 0; j < steps.length; j++) {
+            if (j > 0) {
+              accumulatedTime += (steps[j].travelTime || 0);
+            }
+            const plantingDelay = activeRole === "freeloader" ? 0 : j * 6 * 60;
+            steps[j].arrivalTimeMs = startTimeMs + (accumulatedTime + plantingDelay) * 1000;
           }
         }
       }
@@ -3690,8 +3702,11 @@ export default function App() {
                                           <span className="bg-emerald-500/20 text-emerald-400 w-3.5 h-3.5 rounded-full flex items-center justify-center font-bold text-[8px] shrink-0 mt-0.5">起</span>
                                           <div className="flex flex-col">
                                             <span className="font-bold text-slate-200">#{hNum} {name}</span>
-                                            <span className="text-[9px] text-cyan-400 font-medium mt-0.5">
-                                              🎗️ 預估飄帶：{formatTimeFromMs(ribbonStart)} ~ {formatTimeFromMs(ribbonEnd)}
+                                            <span className="text-[9px] text-emerald-400 font-medium mt-0.5">
+                                              🍃 {isBlooming ? `變葉時間：${formatTimeFromMs(leafTime)}` : "當前狀態：綠葉"}
+                                            </span>
+                                            <span className="text-[9px] text-pink-400 font-medium mt-0.5">
+                                              ⏱️ 預估抵達：{step.arrivalTimeMs ? formatTimeFromMs(step.arrivalTimeMs) : "立即"}
                                             </span>
                                           </div>
                                         </div>
@@ -3709,8 +3724,11 @@ export default function App() {
                                             <span className="bg-purple-500/20 text-purple-400 w-3.5 h-3.5 rounded-full flex items-center justify-center font-bold text-[8px] shrink-0 mt-0.5">{idx + 1}</span>
                                             <div className="flex flex-col">
                                               <span className="font-bold text-slate-200">#{hNum} {name}</span>
-                                              <span className="text-[9px] text-cyan-400 font-medium mt-0.5">
-                                                🎗️ 預估飄帶：{formatTimeFromMs(ribbonStart)} ~ {formatTimeFromMs(ribbonEnd)}
+                                              <span className="text-[9px] text-emerald-400 font-medium mt-0.5">
+                                                🍃 {isBlooming ? `變葉時間：${formatTimeFromMs(leafTime)}` : "當前狀態：綠葉"}
+                                              </span>
+                                              <span className="text-[9px] text-pink-400 font-medium mt-0.5">
+                                                ⏱️ 預估抵達：{step.arrivalTimeMs ? formatTimeFromMs(step.arrivalTimeMs) : "--:--"}
                                               </span>
                                             </div>
                                           </div>
@@ -3875,6 +3893,9 @@ export default function App() {
                                             <span className="text-[9px] text-cyan-400 font-medium mt-0.5">
                                               🎗️ 預估飄帶：{formatTimeFromMs(ribbonStart)} ~ {formatTimeFromMs(ribbonEnd)}
                                             </span>
+                                            <span className="text-[9px] text-pink-400 font-medium mt-0.5">
+                                              ⏱️ 預估抵達：{step.arrivalTimeMs ? formatTimeFromMs(step.arrivalTimeMs) : "立即"}
+                                            </span>
                                           </div>
                                         </div>
                                       );
@@ -3893,6 +3914,9 @@ export default function App() {
                                               <span className="font-bold text-slate-200">#{hNum} {name}</span>
                                               <span className="text-[9px] text-cyan-400 font-medium mt-0.5">
                                                 🎗️ 預估飄帶：{formatTimeFromMs(ribbonStart)} ~ {formatTimeFromMs(ribbonEnd)}
+                                              </span>
+                                              <span className="text-[9px] text-pink-400 font-medium mt-0.5">
+                                                ⏱️ 預估抵達：{step.arrivalTimeMs ? formatTimeFromMs(step.arrivalTimeMs) : "--:--"}
                                               </span>
                                             </div>
                                           </div>
