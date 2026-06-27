@@ -231,10 +231,9 @@ export default function App() {
   const handleLoginSubmit = () => {
     if (!selectedRole) return;
     localStorage.setItem("user_role", selectedRole);
-    localStorage.setItem("user_nickname", userNickname);
     setUserRole(selectedRole);
     setNavModalTab(selectedRole);
-    showToast(`🌸 歡迎代號 [${userNickname || "無名英雄"}] 的特攻大師！`);
+    showToast("🌸 歡迎使用基隆大花導航與精算系統！");
     playSynthChime();
   };
   const [plantingSpeed, setPlantingSpeed] = useState<number>(5); // 5 km/h for walking, 15 km/h for riding
@@ -286,8 +285,23 @@ export default function App() {
     }
     setLandmarks(initialLandmarks);
 
-    // 3. Setup Leaflet Map
-    if (typeof L !== 'undefined' && mapContainerRef.current && !isMapInitialized.current) {
+    // 4. Try authenticating with saved manual token or pull sheets
+    if (savedManualToken) {
+      setGoogleAccessToken(savedManualToken);
+      handleSuccessfulLogin(savedManualToken, savedSheetId);
+    } else {
+      pullDataFromSheets(null, savedSheetId);
+    }
+
+    // 5. Initialize GSI client
+    setTimeout(() => {
+      initGoogleClient(savedClientId, savedSheetId);
+    }, 800);
+  }, []);
+
+  // Separate map initialization effect to ensure it runs when mapContainer is actually mounted in the DOM
+  useEffect(() => {
+    if (userRole && typeof L !== 'undefined' && mapContainerRef.current && !isMapInitialized.current) {
       try {
         const initialCenter = [25.132, 121.745];
         const mapObj = L.map(mapContainerRef.current, { zoomControl: false }).setView(initialCenter, 14);
@@ -301,39 +315,27 @@ export default function App() {
         mapRef.current = mapObj;
         isMapInitialized.current = true;
 
-        // Auto-center map on initial landmarks
-        const regionLandmarks = initialLandmarks.filter(l => l.region === "keelung");
-        if (regionLandmarks.length > 0) {
-          const avgLat = regionLandmarks.reduce((acc, cur) => acc + cur.lat, 0) / regionLandmarks.length;
-          const avgLng = regionLandmarks.reduce((acc, cur) => acc + cur.lng, 0) / regionLandmarks.length;
-          mapObj.setView([avgLat, avgLng], 14);
+        if (landmarks.length > 0) {
+          const regionLandmarks = landmarks.filter(l => l.region === "keelung");
+          if (regionLandmarks.length > 0) {
+            const avgLat = regionLandmarks.reduce((acc, cur) => acc + cur.lat, 0) / regionLandmarks.length;
+            const avgLng = regionLandmarks.reduce((acc, cur) => acc + cur.lng, 0) / regionLandmarks.length;
+            mapObj.setView([avgLat, avgLng], 14);
+          }
         }
       } catch (err) {
         console.error("Failed to initialize Leaflet Map:", err);
       }
     }
 
-    // 4. Try authenticating with saved manual token or pull sheets
-    if (savedManualToken) {
-      setGoogleAccessToken(savedManualToken);
-      handleSuccessfulLogin(savedManualToken, savedSheetId);
-    } else {
-      pullDataFromSheets(null, savedSheetId);
-    }
-
-    // 5. Initialize GSI client
-    setTimeout(() => {
-      initGoogleClient(savedClientId, savedSheetId);
-    }, 800);
-
     return () => {
-      if (mapRef.current) {
+      if (!userRole && mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
         isMapInitialized.current = false;
       }
     };
-  }, []);
+  }, [userRole, landmarks]);
 
   // Recalculate Leaflet map layout sizes when layout toggles between Simple and Editor
   useEffect(() => {
@@ -1804,7 +1806,7 @@ export default function App() {
       const preservedOtherRegions = landmarks.filter(l => l.region !== activeRegion);
       const newLandmarksFromGPX = filteredPoints.map((pt, idx) => ({
         id: idx + 1,
-        name: `特攻大花 ${String(idx + 1).padStart(2, '0')}`,
+        name: `自訂大花 ${String(idx + 1).padStart(2, '0')}`,
         lat: pt.lat,
         lng: pt.lng,
         expire: null,
@@ -1822,7 +1824,7 @@ export default function App() {
         mapRef.current.setView([avgLat, avgLng], 15);
       }
 
-      showToast(`✅ 成功導入 ${newLandmarksFromGPX.length} 個重組過濾特攻點位！`);
+      showToast(`✅ 成功導入 ${newLandmarksFromGPX.length} 個重組過濾自訂大花點位！`);
       playSynthChime();
     } catch (err) {
       showToast("❌ GPX 代碼解析異常，請確認 XML 語法。");
@@ -1889,29 +1891,17 @@ export default function App() {
               <span className="text-4xl">🌸</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-black tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-pink-400 via-purple-400 to-indigo-400">
-              花嶼雞籠 特攻戰區
+              花嶼雞籠 大花地圖
             </h1>
             <p className="text-slate-400 text-xs tracking-wider font-bold">
-              基隆大花即時特攻導航與駐點精算系統
+              基隆大花即時導航與駐點精算系統
             </p>
           </div>
 
           <div className="space-y-4">
-            {/* Nickname Input */}
-            <div className="space-y-1.5">
-              <label className="text-xs text-slate-400 font-bold block">👤 請輸入您的特攻代號 (選填)：</label>
-              <input
-                type="text"
-                placeholder="例如：暖暖種花達人、強開雷達手"
-                value={userNickname}
-                onChange={(e) => setUserNickname(e.target.value)}
-                className="w-full p-3 rounded-2xl bg-slate-950 border border-slate-800 text-slate-200 text-xs focus:outline-none focus:ring-1 focus:ring-pink-500 placeholder-slate-600 transition"
-              />
-            </div>
-
             {/* Role Selection Label */}
             <div className="space-y-2">
-              <label className="text-xs text-slate-400 font-bold block">🧭 請選擇您今日的特攻任務身分：</label>
+              <label className="text-xs text-slate-400 font-bold block">🌱 請選擇您今日的種花方式：</label>
               
               <div className="grid grid-cols-1 gap-3">
                 {/* Option 1: Planting */}
@@ -1930,7 +1920,7 @@ export default function App() {
                   <div className="flex items-center gap-3">
                     <span className="text-2xl">🚶‍♂️🚴‍♀️</span>
                     <div className="flex-1">
-                      <h3 className="font-bold text-xs text-pink-400">走路/騎車特攻隊 (種花專用)</h3>
+                      <h3 className="font-bold text-xs text-pink-400">走路/騎車普通種花</h3>
                       <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
                         以種一株花 <strong className="text-white">6 分鐘</strong> 加上移動時間精算，規劃連續種花最優路線，出門一趟種最多花！
                       </p>
@@ -1959,9 +1949,9 @@ export default function App() {
                   <div className="flex items-center gap-3">
                     <span className="text-2xl">🎯⚡</span>
                     <div className="flex-1">
-                      <h3 className="font-bold text-xs text-purple-400">500m 強開先鋒隊 (強開專用)</h3>
+                      <h3 className="font-bold text-xs text-purple-400">500m 雷達強開花</h3>
                       <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
-                        強開不用等待時間！利用 <strong className="text-white">500 米</strong> 雷達感應範圍，推薦最佳駐點，停在該點同時感應強開所有花朵！
+                        利用 <strong className="text-white">500 米</strong> 雷達感應範圍，推薦最佳駐點，停在該點同時感應強開所有花朵！
                       </p>
                     </div>
                   </div>
@@ -1987,7 +1977,7 @@ export default function App() {
             }`}
           >
             <i className="fa-solid fa-rocket"></i>
-            <span>進入基隆特攻戰區</span>
+            <span>進入大花地圖</span>
           </button>
 
           <p className="text-[9px] text-slate-500 text-center">
@@ -2032,11 +2022,11 @@ export default function App() {
                       localStorage.removeItem("user_role");
                       setUserRole(null);
                       setSelectedRole(null);
-                      showToast("請重新選擇特攻身分");
+                      showToast("請重新選擇種花方式");
                       playSynthChime();
                     }}
                     className="text-[10px] font-black bg-pink-500/10 hover:bg-pink-500/20 border border-pink-500/30 text-pink-400 px-2 py-1.5 rounded-xl transition flex items-center gap-1"
-                    title="切換身分"
+                    title="切換方式"
                   >
                     <span>{userRole === "planting" ? "🚶‍♂️種花" : "🎯強開"}</span>
                     <i className="fa-solid fa-arrows-rotate text-[8px]"></i>
@@ -2100,24 +2090,19 @@ export default function App() {
             {userRole && (
               <div className="flex items-center gap-2 bg-slate-950/80 rounded-2xl p-2 border border-purple-500/30 text-xs">
                 <span className="text-pink-400 font-bold">
-                  {userRole === "planting" ? "🚶‍♂️ 走路/騎車種花" : "🎯 強開雷達特攻"}
+                  {userRole === "planting" ? "🚶‍♂️ 走路/騎車種花" : "🎯 雷達強開花"}
                 </span>
-                {userNickname && (
-                  <span className="text-slate-400 font-mono text-[10px]">
-                    [{userNickname}]
-                  </span>
-                )}
                 <button
                   onClick={() => {
                     localStorage.removeItem("user_role");
                     setUserRole(null);
                     setSelectedRole(null);
-                    showToast("請重新選擇身分");
+                    showToast("請重新選擇種花方式");
                     playSynthChime();
                   }}
                   className="text-slate-300 hover:text-red-400 text-[10px] bg-[#0b0f19] border border-slate-800 px-2 py-0.5 rounded-lg font-bold transition ml-1"
                 >
-                  切換身分
+                  切換方式
                 </button>
               </div>
             )}
@@ -2966,7 +2951,7 @@ export default function App() {
           <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-sm p-6 shadow-2xl text-center">
             <div className="text-3xl text-red-500 mb-2">⚠️</div>
             <h3 className="font-bold text-base text-slate-200">確定清除所有數據並重置？</h3>
-            <p className="text-slate-400 text-xs mt-2 leading-relaxed">這將會清除您當前對本特攻戰區的所有自訂標記與時間紀錄，回復至全新預設狀態。</p>
+            <p className="text-slate-400 text-xs mt-2 leading-relaxed">這將會清除您當前對本區域的所有自訂標記與時間紀錄，回復至全新預設狀態。</p>
             <div className="pt-5 flex gap-2 justify-center">
               <button onClick={() => setShowResetModal(false)} className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold px-4 py-2.5 rounded-xl text-xs transition">取消</button>
               <button onClick={resetDataToDefault} className="bg-red-500 hover:bg-red-600 text-white font-bold px-5 py-2.5 rounded-xl text-xs transition shadow-md">確認清除</button>
@@ -2982,7 +2967,7 @@ export default function App() {
             <div className="flex items-center justify-between pb-3 border-b border-slate-800">
               <div className="flex items-center gap-2">
                 <span className="text-xl">🧭</span>
-                <h3 className="font-black text-sm sm:text-base text-slate-100">特攻路線與駐點規劃大師</h3>
+                <h3 className="font-black text-sm sm:text-base text-slate-100">大花路線與最佳駐點規劃</h3>
               </div>
               <button onClick={() => setShowNavModal(false)} className="text-slate-500 hover:text-slate-300 p-1 transition">
                 <i className="fa-solid fa-circle-xmark text-lg"></i>
