@@ -1001,8 +1001,9 @@ export default function App() {
 
           // Total duration of the planting route (30 mins of planting + travel time, or just travel time for freeloader)
           const totalDurationSec = (userRole === "freeloader" ? 0 : 5 * 6 * 60) + accumulatedTravelTime;
-          if (totalDurationSec > 90 * 60) {
-            continue; // Strictly reject permutations exceeding 90 minutes
+          const maxDurationSec = userRole === "freeloader" ? 45 * 60 : 90 * 60;
+          if (totalDurationSec > maxDurationSec) {
+            continue; // Strictly reject permutations exceeding max duration (45 mins for freeloader, 90 mins for planting)
           }
 
           const earliestValidS = Math.max(now, currentSMin);
@@ -1034,7 +1035,7 @@ export default function App() {
 
       if (bestStartTime === Infinity) {
         recommendedPlantingTime = userRole === "freeloader" 
-          ? "無符合之5花白嫖路線" 
+          ? "無符合(或總時間超45分)之5花白嫖路線" 
           : "無符合(或總時間超90分)之5花點路線";
       } else if (bestStartTime <= now) {
         recommendedPlantingTime = userRole === "freeloader"
@@ -1154,6 +1155,58 @@ export default function App() {
 
     const speedMps = (plantingSpeed * 1000) / 3600;
 
+    const testRouteCompatibility = (
+      testPath: typeof targets,
+      activeRole: "planting" | "freeloader",
+      speedMps: number,
+      maxDurationSec: number
+    ) => {
+      let totalDistance = 0;
+      for (let i = 1; i < testPath.length; i++) {
+        totalDistance += getDistance(testPath[i - 1].lat, testPath[i - 1].lng, testPath[i].lat, testPath[i].lng);
+      }
+      const totalTravelTime = totalDistance / speedMps;
+      const totalPlantingTime = activeRole === "freeloader" ? 0 : testPath.length * 6 * 60;
+      const totalDuration = totalTravelTime + totalPlantingTime;
+
+      if (totalDuration > maxDurationSec) {
+        return { isValid: false };
+      }
+
+      let currentSMin = -Infinity;
+      let currentSMax = Infinity;
+      let accumulatedTravelTime = 0;
+
+      for (let j = 0; j < testPath.length; j++) {
+        const currFlower = testPath[j];
+        const window = activeRole === "freeloader" ? getHarvestWindow(currFlower, now) : getLeafWindow(currFlower, now);
+        
+        if (j > 0) {
+          const prevFlower = testPath[j - 1];
+          const dist = getDistance(prevFlower.lat, prevFlower.lng, currFlower.lat, currFlower.lng);
+          accumulatedTravelTime += dist / speedMps;
+        }
+        
+        const plantingDelaySec = activeRole === "freeloader" ? 0 : j * 6 * 60;
+        const delayMs = (plantingDelaySec + accumulatedTravelTime) * 1000;
+        
+        const sMinForThis = window.start - delayMs;
+        const sMaxForThis = window.end - delayMs;
+
+        if (sMinForThis > currentSMin) {
+          currentSMin = sMinForThis;
+        }
+        if (sMaxForThis < currentSMax) {
+          currentSMax = sMaxForThis;
+        }
+      }
+
+      const earliestValidS = Math.max(now, currentSMin);
+      const isValid = earliestValidS <= currentSMax;
+
+      return { isValid };
+    };
+
     // Helper to calculate route details for a given ordered path
     const calculateRouteDetails = (path: typeof targets) => {
       let totalDistance = 0;
@@ -1216,8 +1269,12 @@ export default function App() {
       let recommendedStartTime = "無符合時間的路線";
       let startTimeMs = Infinity;
 
-      if (totalDuration > 90 * 60) {
-        recommendedStartTime = "總時間超過 90 分鐘上限 (請切換交通工具)";
+      const maxDurationSec = activeRole === "freeloader" ? 45 * 60 : 90 * 60;
+
+      if (totalDuration > maxDurationSec) {
+        recommendedStartTime = activeRole === "freeloader" 
+          ? "總時間超過 45 分鐘上限 (請切換交通工具)" 
+          : "總時間超過 90 分鐘上限 (請切換交通工具)";
       } else {
         const earliestValidS = Math.max(now, currentSMin);
         if (earliestValidS <= currentSMax) {
@@ -1246,13 +1303,13 @@ export default function App() {
 
     // Partition unassigned targets into routes of size 5
     while (unassigned.length >= 5) {
-      // Find starting point (prioritize earliest expire time among blooming, or first unassigned)
+      // Find starting point (prioritize earliest windowStart)
       let startIdx = 0;
-      let earliestExpire = Infinity;
+      let earliestStart = Infinity;
       for (let i = 0; i < unassigned.length; i++) {
-        const exp = unassigned[i].expire ? new Date(unassigned[i].expire!).getTime() : Infinity;
-        if (exp < earliestExpire) {
-          earliestExpire = exp;
+        const window = activeRole === "freeloader" ? getHarvestWindow(unassigned[i], now) : getLeafWindow(unassigned[i], now);
+        if (window.start < earliestStart) {
+          earliestStart = window.start;
           startIdx = i;
         }
       }
@@ -1262,21 +1319,48 @@ export default function App() {
       path.push(curr);
       unassigned.splice(startIdx, 1);
 
+      const maxDurationSec = activeRole === "freeloader" ? 45 * 60 : 90 * 60;
+
       // Greedily find the nearest 4 unassigned neighbors
       for (let k = 0; k < 4; k++) {
         if (unassigned.length === 0) break;
-        let bestIdx = 0;
+        
+        let bestIdx = -1;
         let bestDist = Infinity;
+        
         for (let i = 0; i < unassigned.length; i++) {
-          const d = getDistance(curr.lat, curr.lng, unassigned[i].lat, unassigned[i].lng);
-          if (d < bestDist) {
-            bestDist = d;
-            bestIdx = i;
+          const candidate = unassigned[i];
+          const testPath = [...path, candidate];
+          const compat = testRouteCompatibility(testPath, activeRole, speedMps, maxDurationSec);
+          
+          if (compat.isValid) {
+            const d = getDistance(curr.lat, curr.lng, candidate.lat, candidate.lng);
+            if (d < bestDist) {
+              bestDist = d;
+              bestIdx = i;
+            }
           }
         }
-        curr = unassigned[bestIdx];
-        path.push(curr);
-        unassigned.splice(bestIdx, 1);
+        
+        if (bestIdx !== -1) {
+          curr = unassigned[bestIdx];
+          path.push(curr);
+          unassigned.splice(bestIdx, 1);
+        } else {
+          // Fallback: nearest neighbor regardless of compatibility
+          let fallbackIdx = 0;
+          let fallbackDist = Infinity;
+          for (let i = 0; i < unassigned.length; i++) {
+            const d = getDistance(curr.lat, curr.lng, unassigned[i].lat, unassigned[i].lng);
+            if (d < fallbackDist) {
+              fallbackDist = d;
+              fallbackIdx = i;
+            }
+          }
+          curr = unassigned[fallbackIdx];
+          path.push(curr);
+          unassigned.splice(fallbackIdx, 1);
+        }
       }
 
       // Calculate details and add
