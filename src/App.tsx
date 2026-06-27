@@ -177,6 +177,16 @@ export default function App() {
   const [navPath, setNavPath] = useState<{ id: number; name: string }[]>([]);
   const [isNavLocating, setIsNavLocating] = useState(false);
 
+  // New Point Addition & Inline Row Editing states
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [addName, setAddName] = useState("");
+  const [addLat, setAddLat] = useState("");
+  const [addLng, setAddLng] = useState("");
+  const [addExpire, setAddExpire] = useState("");
+
+  const [inlineTimeEditId, setInlineTimeEditId] = useState<number | null>(null);
+  const [inlineTimeVal, setInlineTimeVal] = useState("");
+
   // Form Fields inside Modals
   const [configClientId, setConfigClientId] = useState(DEFAULT_CLIENT_ID);
   const [configSheetId, setConfigSheetId] = useState(DEFAULT_SHEET_ID);
@@ -233,25 +243,29 @@ export default function App() {
     setLandmarks(initialLandmarks);
 
     // 3. Setup Leaflet Map
-    if (mapContainerRef.current && !isMapInitialized.current) {
-      const initialCenter = [25.132, 121.745];
-      const mapObj = L.map(mapContainerRef.current, { zoomControl: false }).setView(initialCenter, 14);
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-        subdomains: 'abcd',
-        maxZoom: 20
-      }).addTo(mapObj);
+    if (typeof L !== 'undefined' && mapContainerRef.current && !isMapInitialized.current) {
+      try {
+        const initialCenter = [25.132, 121.745];
+        const mapObj = L.map(mapContainerRef.current, { zoomControl: false }).setView(initialCenter, 14);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+          subdomains: 'abcd',
+          maxZoom: 20
+        }).addTo(mapObj);
 
-      L.control.zoom({ position: 'bottomright' }).addTo(mapObj);
-      mapRef.current = mapObj;
-      isMapInitialized.current = true;
+        L.control.zoom({ position: 'bottomright' }).addTo(mapObj);
+        mapRef.current = mapObj;
+        isMapInitialized.current = true;
 
-      // Auto-center map on initial landmarks
-      const regionLandmarks = initialLandmarks.filter(l => l.region === "keelung");
-      if (regionLandmarks.length > 0) {
-        const avgLat = regionLandmarks.reduce((acc, cur) => acc + cur.lat, 0) / regionLandmarks.length;
-        const avgLng = regionLandmarks.reduce((acc, cur) => acc + cur.lng, 0) / regionLandmarks.length;
-        mapObj.setView([avgLat, avgLng], 14);
+        // Auto-center map on initial landmarks
+        const regionLandmarks = initialLandmarks.filter(l => l.region === "keelung");
+        if (regionLandmarks.length > 0) {
+          const avgLat = regionLandmarks.reduce((acc, cur) => acc + cur.lat, 0) / regionLandmarks.length;
+          const avgLng = regionLandmarks.reduce((acc, cur) => acc + cur.lng, 0) / regionLandmarks.length;
+          mapObj.setView([avgLat, avgLng], 14);
+        }
+      } catch (err) {
+        console.error("Failed to initialize Leaflet Map:", err);
       }
     }
 
@@ -1057,7 +1071,7 @@ export default function App() {
 
   // Keep map markers in sync with processedPoints and active status
   useEffect(() => {
-    if (!mapRef.current) return;
+    if (!mapRef.current || typeof L === 'undefined') return;
 
     // Clear old markers
     for (let key in markersRef.current) {
@@ -1393,6 +1407,79 @@ export default function App() {
     showToast("🗑️ 已成功刪除該花卉標記點位");
   };
 
+  const handleAddPoint = async () => {
+    if (!addName.trim() || !addLat.trim() || !addLng.trim()) {
+      showToast("❌ 請填寫完整名稱、緯度與經度！");
+      playErrorBuzz();
+      return;
+    }
+    const latNum = parseFloat(addLat);
+    const lngNum = parseFloat(addLng);
+    if (isNaN(latNum) || isNaN(lngNum)) {
+      showToast("❌ 經緯度格式不正確！");
+      playErrorBuzz();
+      return;
+    }
+
+    const activeRegionLandmarks = landmarks.filter(l => l.region === activeRegion);
+    const nextId = activeRegionLandmarks.length > 0 ? Math.max(...activeRegionLandmarks.map(l => l.id)) + 1 : 1;
+
+    const newPoint: Landmark = {
+      id: nextId,
+      name: addName.trim(),
+      lat: latNum,
+      lng: lngNum,
+      expire: addExpire ? new Date(addExpire).toISOString() : null,
+      region: activeRegion
+    };
+
+    const updatedList = [...landmarks, newPoint];
+    await pushDataToSheets(updatedList);
+    setShowAddModal(false);
+    playSynthChime();
+    showToast(`🌸 已成功新增點位 #${newPoint.id} (${newPoint.name})！`);
+
+    // Reset inputs
+    setAddName("");
+    setAddLat("");
+    setAddLng("");
+    setAddExpire("");
+
+    setTimeout(() => highlightRowInTable(newPoint.id), 100);
+  };
+
+  const handleInlineTimeSave = async (id: number) => {
+    if (!hasEditPermission) {
+      showToast("❌ 權限拒絕！您僅有唯讀權限。");
+      playErrorBuzz();
+      return;
+    }
+
+    const duration = parseDuration(inlineTimeVal);
+    if (duration.hours === 0 && duration.minutes === 0) {
+      showToast("❌ 無效的時間格式！請輸入如 23h24m 或 1h30m");
+      playErrorBuzz();
+      return;
+    }
+
+    const item = landmarks.find(l => l.id === id && l.region === activeRegion);
+    if (!item) return;
+
+    const newExpire = new Date(Date.now() + (duration.hours * 60 + duration.minutes) * 60 * 1000);
+    const updatedList = landmarks.map(l => {
+      if (l.id === id && l.region === activeRegion) {
+        return { ...l, expire: newExpire.toISOString() };
+      }
+      return l;
+    });
+
+    await pushDataToSheets(updatedList);
+    setInlineTimeEditId(null);
+    playSynthChime();
+    showToast(`🌸 已快速更新 #${item.id} 開花：${duration.hours}h ${duration.minutes}m`);
+    setTimeout(() => highlightRowInTable(item.id), 100);
+  };
+
   const saveConfigurations = async () => {
     const cleanSheetId = extractSheetId(configSheetId);
     setConfigSheetId(cleanSheetId);
@@ -1663,16 +1750,32 @@ export default function App() {
                   <div className="flex items-center gap-2 text-sm text-pink-400 font-extrabold bg-pink-500/10 border border-pink-500/20 py-2 px-4 rounded-xl flex-grow">
                     <span>📍 目前部署：基隆東岸 {regionPoints.length} 花</span>
                   </div>
-                  <button onClick={() => {
-                    if (!hasEditPermission) {
-                      showToast("❌ 權限不足！請先登入具備編輯權限之帳號");
-                      playErrorBuzz();
-                      return;
-                    }
-                    setShowGPXModal(true);
-                  }} className="bg-slate-800 text-emerald-400 hover:bg-slate-700 border border-emerald-500/30 font-bold text-xs py-2 px-3 rounded-xl transition flex items-center justify-center gap-1.5 h-10">
-                    <i className="fa-solid fa-file-import"></i> 導入 GPX
-                  </button>
+                  <div className="flex gap-2">
+                    <button onClick={() => {
+                      if (!hasEditPermission) {
+                        showToast("❌ 權限不足！請先登入具備編輯權限之帳號");
+                        playErrorBuzz();
+                        return;
+                      }
+                      setAddName(`大花 ${regionPoints.length + 1}`);
+                      setAddLat("25.1311");
+                      setAddLng("121.7411");
+                      setAddExpire("");
+                      setShowAddModal(true);
+                    }} className="bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white font-bold text-xs py-2 px-3 rounded-xl transition flex items-center justify-center gap-1.5 h-10 shadow-md">
+                      <i className="fa-solid fa-plus"></i> 新增點位
+                    </button>
+                    <button onClick={() => {
+                      if (!hasEditPermission) {
+                        showToast("❌ 權限不足！請先登入具備編輯權限之帳號");
+                        playErrorBuzz();
+                        return;
+                      }
+                      setShowGPXModal(true);
+                    }} className="bg-slate-800 text-emerald-400 hover:bg-slate-700 border border-emerald-500/30 font-bold text-xs py-2 px-3 rounded-xl transition flex items-center justify-center gap-1.5 h-10">
+                      <i className="fa-solid fa-file-import"></i> 導入 GPX
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -1737,8 +1840,19 @@ export default function App() {
               ref={mapContainerRef} 
               id="map" 
               style={{ height: hasEditPermission ? "420px" : "360px" }}
-              className="rounded-2xl overflow-hidden border border-slate-800"
-            ></div>
+              className="rounded-2xl overflow-hidden border border-slate-800 relative"
+            >
+              {typeof L === 'undefined' && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/95 text-center p-6 z-50">
+                  <span className="text-3xl mb-2">🗺️</span>
+                  <p className="text-sm font-bold text-slate-200">地圖組件加載失敗或被瀏覽器阻擋</p>
+                  <p className="text-xs text-slate-400 mt-2 max-w-xs leading-relaxed">
+                    請確認您的網路連線正常。若您正在使用 GitHub Preview / Iframe 或沙盒環境，這可能是因為瀏覽器阻擋了第三方 CDN 腳本 (unpkg.com) 的載入。<br />
+                    請點選右上角的 <span className="text-pink-400 font-bold">「新分頁開啟」</span> 以獲得完整且獨立的地圖瀏覽體驗！
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
 
         </div>
@@ -1957,17 +2071,70 @@ export default function App() {
                               <td className="py-3 px-4">{countdownLabel}</td>
                               <td className="py-3 px-4 text-right pr-6">
                                 <div className="flex justify-end items-center gap-3">
-                                  {item.isBlooming && item.expire && (
-                                    <span className="text-[11px] text-slate-400 font-medium">
-                                      於 {formatDateTimeShort(item.expire)} 枯萎
-                                    </span>
+                                  {inlineTimeEditId === item.id ? (
+                                    <div className="flex items-center gap-1.5 justify-end" onClick={(e) => e.stopPropagation()}>
+                                      <input
+                                        type="text"
+                                        value={inlineTimeVal}
+                                        onChange={(e) => setInlineTimeVal(e.target.value)}
+                                        placeholder="例如 23h24m"
+                                        className="w-24 px-2 py-1 bg-slate-950 border border-purple-500 rounded-lg text-xs font-mono text-slate-200 focus:outline-none focus:ring-1 focus:ring-purple-500 placeholder-slate-600"
+                                        autoFocus
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter') {
+                                            handleInlineTimeSave(item.id);
+                                          } else if (e.key === 'Escape') {
+                                            setInlineTimeEditId(null);
+                                          }
+                                        }}
+                                      />
+                                      <button
+                                        onClick={() => handleInlineTimeSave(item.id)}
+                                        className="bg-purple-600 hover:bg-purple-700 text-white p-1 rounded-lg transition text-xs flex items-center justify-center w-6 h-6"
+                                        title="儲存"
+                                      >
+                                        <i className="fa-solid fa-check text-[10px]"></i>
+                                      </button>
+                                      <button
+                                        onClick={() => setInlineTimeEditId(null)}
+                                        className="bg-slate-800 hover:bg-slate-700 text-slate-400 p-1 rounded-lg transition text-xs flex items-center justify-center w-6 h-6"
+                                        title="取消"
+                                      >
+                                        <i className="fa-solid fa-xmark text-[10px]"></i>
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <>
+                                      {item.isBlooming && item.expire && (
+                                        <span className="text-[11px] text-slate-400 font-medium hidden sm:inline">
+                                          於 {formatDateTimeShort(item.expire)} 枯萎
+                                        </span>
+                                      )}
+                                      <button 
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          if (!hasEditPermission) {
+                                            showToast("❌ 權限不足！請先登入具備編輯權限之帳號");
+                                            playErrorBuzz();
+                                            return;
+                                          }
+                                          setInlineTimeEditId(item.id);
+                                          setInlineTimeVal("");
+                                        }}
+                                        className="bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 border border-purple-500/20 hover:border-purple-500/40 text-xs font-bold py-1 px-2.5 rounded-lg transition duration-150 flex items-center gap-1 active:scale-95"
+                                        title="直接輸入 xhxxm 剩餘時間"
+                                      >
+                                        <i className="fa-solid fa-clock text-[10px]"></i> 設時間
+                                      </button>
+                                      <button 
+                                        onClick={() => triggerEditModal(item.id)}
+                                        className="text-slate-500 hover:text-slate-300 p-1.5 rounded transition"
+                                        title="編輯地標"
+                                      >
+                                        <i className="fa-solid fa-pencil text-xs"></i>
+                                      </button>
+                                    </>
                                   )}
-                                  <button 
-                                    onClick={() => triggerEditModal(item.id)}
-                                    className="text-slate-500 hover:text-slate-300 p-1.5 rounded transition"
-                                  >
-                                    <i className="fa-solid fa-pencil"></i>
-                                  </button>
                                 </div>
                               </td>
                             </tr>
@@ -2240,6 +2407,73 @@ export default function App() {
               <div className="flex-grow"></div>
               <button onClick={() => setShowEditModal(false)} className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold px-4 py-2.5 rounded-xl text-xs transition">取消</button>
               <button onClick={saveModalChanges} className="bg-purple-600 hover:bg-purple-700 text-white font-bold px-5 py-2.5 rounded-xl text-xs transition shadow-md">儲存修改</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Point Add Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md p-6 shadow-2xl">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+              <h3 className="font-bold text-base text-slate-100 flex items-center gap-2">
+                <span>➕ 新增自訂大花地標</span>
+              </h3>
+              <button onClick={() => setShowAddModal(false)} className="text-slate-500 hover:text-slate-300 transition">
+                <i className="fa-solid fa-circle-xmark text-lg"></i>
+              </button>
+            </div>
+            
+            <div className="py-4 space-y-4 text-xs">
+              <div>
+                <label className="text-slate-400 block mb-1">景點地名</label>
+                <input 
+                  type="text" 
+                  value={addName} 
+                  onChange={(e) => setAddName(e.target.value)}
+                  placeholder="例如: 基隆港東岸大花"
+                  className="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-slate-400 block mb-1">緯度 (Lat)</label>
+                  <input 
+                    type="number" 
+                    step="0.000001" 
+                    value={addLat} 
+                    onChange={(e) => setAddLat(e.target.value)}
+                    placeholder="25.132"
+                    className="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-slate-400 block mb-1">經度 (Lng)</label>
+                  <input 
+                    type="number" 
+                    step="0.000001" 
+                    value={addLng} 
+                    onChange={(e) => setAddLng(e.target.value)}
+                    placeholder="121.745"
+                    className="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-slate-400 block mb-1">開花終止時間 (選填，不填為葉子)</label>
+                <input 
+                  type="datetime-local" 
+                  value={addExpire} 
+                  onChange={(e) => setAddExpire(e.target.value)}
+                  className="w-full p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500"
+                />
+              </div>
+            </div>
+
+            <div className="pt-4 border-t border-slate-800 flex gap-2 justify-end">
+              <button onClick={() => setShowAddModal(false)} className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold px-4 py-2.5 rounded-xl text-xs transition">取消</button>
+              <button onClick={handleAddPoint} className="bg-purple-600 hover:bg-purple-700 text-white font-bold px-5 py-2.5 rounded-xl text-xs transition shadow-md">新增地標</button>
             </div>
           </div>
         </div>
