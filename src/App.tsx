@@ -186,6 +186,24 @@ const getLeafWindow = (flower: { expire?: string | null }, currentTimeMs: number
   }
 };
 
+// Helper to get the harvest window of a flower for freeloader (white-pying) mode
+const getHarvestWindow = (flower: { expire?: string | null }, currentTimeMs: number) => {
+  const expireTime = flower.expire ? new Date(flower.expire).getTime() : 0;
+  if (expireTime > currentTimeMs) {
+    // Currently blooming, can harvest immediately until it expires
+    return {
+      start: currentTimeMs,
+      end: expireTime
+    };
+  } else {
+    // Currently a leaf: others will bloom it in 15 minutes, after which it stays bloomed for 23 hours
+    return {
+      start: currentTimeMs + 15 * 60 * 1000,
+      end: currentTimeMs + 15 * 60 * 1000 + 23 * 60 * 60 * 1000
+    };
+  }
+};
+
 // Helper to calculate earliest time at which at least 5 flowers in a circle are leaf simultaneously,
 // with the condition that the difference between the first and last flower becoming a leaf does not exceed 20 minutes.
 const getEarliestForceBloomTimeForCircle = (circleFlowers: any[], currentTimeMs: number) => {
@@ -216,9 +234,9 @@ const getEarliestForceBloomTimeForCircle = (circleFlowers: any[], currentTimeMs:
 export default function App() {
   const [landmarks, setLandmarks] = useState<Landmark[]>([]);
   // User login/identity state
-  const [userRole, setUserRole] = useState<"planting" | "force_bloom" | null>(() => {
+  const [userRole, setUserRole] = useState<"planting" | "force_bloom" | "freeloader" | null>(() => {
     const saved = localStorage.getItem("user_role");
-    return (saved === "planting" || saved === "force_bloom") ? saved : null;
+    return (saved === "planting" || saved === "force_bloom" || saved === "freeloader") ? (saved as any) : null;
   });
   const [mapReady, setMapReady] = useState(false);
   const [activeRegion] = useState("keelung");
@@ -277,14 +295,18 @@ export default function App() {
   const [gpxText, setGpxText] = useState("");
 
   // Planner & Route Customizations
-  const [navModalTab, setNavModalTab] = useState<"planting" | "force_bloom">("planting");
-  const [selectedRole, setSelectedRole] = useState<"planting" | "force_bloom" | null>(null);
+  const [navModalTab, setNavModalTab] = useState<"planting" | "force_bloom" | "freeloader">("planting");
+  const [selectedRole, setSelectedRole] = useState<"planting" | "force_bloom" | "freeloader" | null>(null);
 
   const handleLoginSubmit = () => {
     if (!selectedRole) return;
     localStorage.setItem("user_role", selectedRole);
     setUserRole(selectedRole);
-    setNavModalTab(selectedRole);
+    if (selectedRole === "freeloader") {
+      setNavModalTab("freeloader");
+    } else {
+      setNavModalTab(selectedRole);
+    }
     showToast("🌸 歡迎使用基隆大花導航與精算系統！");
     playSynthChime();
   };
@@ -902,11 +924,11 @@ export default function App() {
   const clusterIds = new Set<number>();
   let recommendedPlantingTime = "無建議時間";
 
-  if (userRole === "planting") {
-    // Planting mode: find the earliest starting time S for sequentially planting at least 5 flowers.
-    // Include all region points, treating leaves as expired at `now`.
+  if (userRole === "planting" || userRole === "freeloader") {
+    // Planting or Freeloader mode: find the earliest starting time S for sequentially planting/harvesting at least 5 flowers.
+    // Include all region points, using the appropriate time windows.
     const allRegionPointsWithTime = regionPoints.map(l => {
-      const window = getLeafWindow(l, now);
+      const window = userRole === "freeloader" ? getHarvestWindow(l, now) : getLeafWindow(l, now);
       return {
         ...l,
         windowStart: window.start,
@@ -915,7 +937,7 @@ export default function App() {
     }).sort((a, b) => a.windowStart - b.windowStart);
 
     if (allRegionPointsWithTime.length < 5) {
-      recommendedPlantingTime = "本區花點不足 5 朵";
+      recommendedPlantingTime = userRole === "freeloader" ? "本區花點不足 5 朵" : "本區花點不足 5 朵";
     } else {
       const getBestStartTimeFor5 = (flowers: typeof allRegionPointsWithTime) => {
         // Generate all 120 permutations of 5 elements
@@ -948,7 +970,7 @@ export default function App() {
               accumulatedTravelTime += dist / speedMps;
             }
             
-            const plantingDelaySec = j * 6 * 60; // 6 mins per flower in seconds
+            const plantingDelaySec = userRole === "freeloader" ? 0 : j * 6 * 60; // 6 mins per flower in seconds for planting, 0 for freeloader
             const delayMs = (plantingDelaySec + accumulatedTravelTime) * 1000;
             
             const sMinForThis = currFlower.windowStart - delayMs;
@@ -962,8 +984,8 @@ export default function App() {
             }
           }
 
-          // Total duration of the planting route (30 mins of planting + travel time)
-          const totalDurationSec = (5 * 6 * 60) + accumulatedTravelTime;
+          // Total duration of the planting route (30 mins of planting + travel time, or just travel time for freeloader)
+          const totalDurationSec = (userRole === "freeloader" ? 0 : 5 * 6 * 60) + accumulatedTravelTime;
           if (totalDurationSec > 90 * 60) {
             continue; // Strictly reject permutations exceeding 90 minutes
           }
@@ -996,14 +1018,20 @@ export default function App() {
       bestGroup.forEach(f => clusterIds.add(f.id));
 
       if (bestStartTime === Infinity) {
-        recommendedPlantingTime = "無符合(或總時間超90分)之5花點路線";
+        recommendedPlantingTime = userRole === "freeloader" 
+          ? "無符合之5花白嫖路線" 
+          : "無符合(或總時間超90分)之5花點路線";
       } else if (bestStartTime <= now) {
-        recommendedPlantingTime = "可立即出發 (滿足5花點)";
+        recommendedPlantingTime = userRole === "freeloader"
+          ? "可立即出發 (滿足白嫖條件)"
+          : "可立即出發 (滿足5花點)";
       } else {
         const dateObj = new Date(bestStartTime);
         const dateStr = `${(dateObj.getMonth() + 1).toString().padStart(2, '0')}/${dateObj.getDate().toString().padStart(2, '0')}`;
         const timeStr = `${dateObj.getHours().toString().padStart(2, '0')}:${dateObj.getMinutes().toString().padStart(2, '0')}`;
-        recommendedPlantingTime = `${dateStr} ${timeStr} (5花點同種最佳時間)`;
+        recommendedPlantingTime = userRole === "freeloader"
+          ? `${dateStr} ${timeStr} (5花白嫖最佳時間)`
+          : `${dateStr} ${timeStr} (5花點同種最佳時間)`;
       }
     }
   } else if (userRole === "force_bloom") {
@@ -1074,14 +1102,16 @@ export default function App() {
     playSynthChime();
   };
 
-  const getMultiplePlantingRoutes = () => {
+  const getMultiplePlantingRoutes = (roleOverride?: "planting" | "freeloader") => {
+    const activeRole = roleOverride || userRole || "planting";
+
     // Filter target landmarks based on user selection ("leaf" or "all")
     const targets = processedPoints.filter(p => {
       if (p.region !== activeRegion) return false;
-      if (plantingTarget === "leaf") {
+      if (activeRole === "planting" && plantingTarget === "leaf") {
         return !p.isBlooming; // only leaves
       }
-      return true; // all
+      return true; // all (freeloader can harvest all)
     });
 
     if (targets.length === 0) {
@@ -1137,7 +1167,7 @@ export default function App() {
       }
 
       const totalTravelTime = totalDistance / speedMps;
-      const totalPlantingTime = path.length * 6 * 60; // 6 mins per flower in seconds
+      const totalPlantingTime = activeRole === "freeloader" ? 0 : path.length * 6 * 60; // 0 mins for freeloader, 6 mins per flower in seconds for planting
       const totalDuration = totalTravelTime + totalPlantingTime;
 
       let currentSMin = -Infinity;
@@ -1146,7 +1176,7 @@ export default function App() {
 
       for (let j = 0; j < path.length; j++) {
         const currFlower = path[j];
-        const window = getLeafWindow(currFlower, now);
+        const window = activeRole === "freeloader" ? getHarvestWindow(currFlower, now) : getLeafWindow(currFlower, now);
         
         if (j > 0) {
           const prevFlower = path[j - 1];
@@ -1154,7 +1184,7 @@ export default function App() {
           accumulatedTravelTime += dist / speedMps;
         }
         
-        const plantingDelaySec = j * 6 * 60; // 6 mins per flower in seconds
+        const plantingDelaySec = activeRole === "freeloader" ? 0 : j * 6 * 60; // 6 mins per flower in seconds
         const delayMs = (plantingDelaySec + accumulatedTravelTime) * 1000;
         
         const sMinForThis = window.start - delayMs;
@@ -1305,6 +1335,7 @@ export default function App() {
       lng: number;
       coveredIds: number[];
       coveredNames: string[];
+      coveredFlowers: { id: number; name: string; isBlooming: boolean; expire: string | null }[];
       maxDist: number;
       recommendedStartTime: string;
       startTimeMs: number;
@@ -1356,6 +1387,12 @@ export default function App() {
             lng: cLng,
             coveredIds: coveredByCentroid.map(t => t.id),
             coveredNames: coveredByCentroid.map(t => t.name),
+            coveredFlowers: coveredByCentroid.map(t => ({
+              id: t.id,
+              name: t.name,
+              isBlooming: !!t.isBlooming,
+              expire: t.expire || null
+            })),
             maxDist,
             recommendedStartTime,
             startTimeMs: bestForceBloomTime,
@@ -1752,7 +1789,7 @@ export default function App() {
     });
 
     // Draw active paths or circles based on userRole
-    if (userRole === "planting") {
+    if (userRole === "planting" || userRole === "freeloader") {
       const routes = getMultiplePlantingRoutes();
       routes.forEach((route, rIdx) => {
         if (route.path.length === 0) return;
@@ -1774,7 +1811,7 @@ export default function App() {
             <strong style="color: ${colorInfo.hex}">🚗 路線 ${rIdx + 1} (${colorInfo.name})</strong><br/>
             建議：<strong>${route.recommendedStartTime}</strong><br/>
             花數：${route.path.length} 朵<br/>
-            時長：${Math.floor(route.totalDuration / 60)} 分 ${Math.round(route.totalDuration % 60)} 秒
+            時長：${Math.floor(route.totalDuration / 60)} 分 ${Math.round(route.totalDuration % 60)} 秒 (${userRole === "freeloader" ? "伸手黨白嫖" : "種花"})
           </div>
         `);
 
@@ -2368,6 +2405,35 @@ export default function App() {
                     </div>
                   )}
                 </button>
+
+                {/* Option 3: Freeloader / 伸手黨 */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedRole("freeloader");
+                    playSynthChime();
+                  }}
+                  className={`p-4 rounded-2xl border text-left transition duration-200 relative overflow-hidden ${
+                    selectedRole === "freeloader"
+                      ? "bg-amber-500/10 border-amber-500"
+                      : "bg-slate-950 border-slate-800 hover:border-slate-700"
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">👑💎</span>
+                    <div className="flex-1">
+                      <h3 className="font-bold text-xs text-amber-400">伸手黨白嫖收割</h3>
+                      <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
+                        不需辛勤種植！預估市區葉子最快 <strong className="text-white">15 分鐘內</strong> 會被他人種開，精算最省力之 5+ 朵大花白嫖路線！
+                      </p>
+                    </div>
+                  </div>
+                  {selectedRole === "freeloader" && (
+                    <div className="absolute top-2 right-2 text-amber-400">
+                      <i className="fa-solid fa-circle-check"></i>
+                    </div>
+                  )}
+                </button>
               </div>
             </div>
           </div>
@@ -2435,7 +2501,7 @@ export default function App() {
                     className="text-[10px] font-black bg-pink-500/10 hover:bg-pink-500/20 border border-pink-500/30 text-pink-400 px-2 py-1.5 rounded-xl transition flex items-center gap-1"
                     title="切換方式"
                   >
-                    <span>{userRole === "planting" ? "🚶‍♂️種花" : "🎯強開"}</span>
+                    <span>{userRole === "planting" ? "🚶‍♂️種花" : userRole === "force_bloom" ? "🎯強開" : "👑伸手黨"}</span>
                     <i className="fa-solid fa-arrows-rotate text-[8px]"></i>
                   </button>
                 )}
@@ -2458,8 +2524,8 @@ export default function App() {
             <div className="flex flex-wrap items-center gap-2 bg-slate-950/70 p-2 rounded-2xl border border-purple-500/30 text-[11px] sm:text-xs shadow-inner w-full sm:w-auto">
               <div className="flex items-center gap-1.5 text-pink-400 font-bold">
                 <span className="flex items-center gap-1">
-                  <i className={userRole === "planting" ? "fa-solid fa-seedling text-emerald-400" : "fa-solid fa-circle-dot text-purple-400"}></i> 
-                  {userRole === "planting" ? "建議種花時間：" : "建議強開時間："}
+                  <i className={userRole === "planting" ? "fa-solid fa-seedling text-emerald-400" : userRole === "force_bloom" ? "fa-solid fa-circle-dot text-purple-400" : "fa-solid fa-crown text-amber-400"}></i> 
+                  {userRole === "planting" ? "建議種花時間：" : userRole === "force_bloom" ? "建議強開時間：" : "建議白嫖時間："}
                 </span>
                 <span className="text-white font-black bg-purple-950 px-2 py-0.5 rounded-lg border border-purple-500/30">
                   {recommendedPlantingTime}
@@ -2469,6 +2535,11 @@ export default function App() {
               <button
                 onClick={() => {
                   setSelectedSuggestedSpot(null);
+                  if (userRole === "freeloader") {
+                    setNavModalTab("freeloader");
+                  } else {
+                    setNavModalTab(userRole === "force_bloom" ? "force_bloom" : "planting");
+                  }
                   setShowNavModal(true);
                   playSynthChime();
                 }}
@@ -2482,8 +2553,8 @@ export default function App() {
           <div className="hidden lg:flex flex-wrap items-center gap-3">
             {userRole && (
               <div className="flex items-center gap-2 bg-slate-950/80 rounded-2xl p-2 border border-purple-500/30 text-xs">
-                <span className="text-pink-400 font-bold">
-                  {userRole === "planting" ? "🚶‍♂️ 走路/騎車種花" : "🎯 雷達強開花"}
+                <span className="text-pink-400 font-bold flex items-center gap-1">
+                  {userRole === "planting" ? "🚶‍♂️ 走路/騎車種花" : userRole === "force_bloom" ? "🎯 雷達強開花" : "👑 伸手黨白嫖收割"}
                 </span>
                 <button
                   onClick={() => {
@@ -3371,23 +3442,33 @@ export default function App() {
             <div className="flex border-b border-slate-800/80 mb-4 mt-3">
               <button
                 onClick={() => setNavModalTab("planting")}
-                className={`flex-1 pb-2.5 font-bold text-xs text-center border-b-2 transition ${
+                className={`flex-1 pb-2.5 font-bold text-[11px] text-center border-b-2 transition ${
                   navModalTab === "planting"
                     ? "border-pink-500 text-pink-400"
                     : "border-transparent text-slate-400 hover:text-slate-300"
                 }`}
               >
-                🚶‍♂️/🚴‍♀️ 走路騎車最優種花
+                🚶‍♂️/🚴‍♀️ 普通種花
               </button>
               <button
                 onClick={() => setNavModalTab("force_bloom")}
-                className={`flex-1 pb-2.5 font-bold text-xs text-center border-b-2 transition ${
+                className={`flex-1 pb-2.5 font-bold text-[11px] text-center border-b-2 transition ${
                   navModalTab === "force_bloom"
                     ? "border-purple-500 text-purple-400"
                     : "border-transparent text-slate-400 hover:text-slate-300"
                 }`}
               >
-                🎯 500m 強開最佳駐點
+                🎯 500m 強開駐點
+              </button>
+              <button
+                onClick={() => setNavModalTab("freeloader")}
+                className={`flex-1 pb-2.5 font-bold text-[11px] text-center border-b-2 transition ${
+                  navModalTab === "freeloader"
+                    ? "border-amber-500 text-amber-400"
+                    : "border-transparent text-slate-400 hover:text-slate-300"
+                }`}
+              >
+                👑 伸手黨白嫖
               </button>
             </div>
 
@@ -3553,6 +3634,168 @@ export default function App() {
                   );
                 })()}
               </div>
+            ) : navModalTab === "freeloader" ? (
+              <div className="space-y-4 py-1">
+                {/* Speed Selector */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-slate-400 font-bold block">🚴 交通工具/移動時速：</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => setPlantingSpeed(5)}
+                      className={`py-1.5 px-3 rounded-xl border text-[11px] font-bold transition ${
+                        plantingSpeed === 5
+                          ? "bg-purple-500/10 border-purple-500/30 text-purple-400"
+                          : "bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-900"
+                      }`}
+                    >
+                      🚶‍♂️ 走路白嫖 (5 km/h)
+                    </button>
+                    <button
+                      onClick={() => setPlantingSpeed(15)}
+                      className={`py-1.5 px-3 rounded-xl border text-[11px] font-bold transition ${
+                        plantingSpeed === 15
+                          ? "bg-purple-500/10 border-purple-500/30 text-purple-400"
+                          : "bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-900"
+                      }`}
+                    >
+                      🚴‍♀️ 騎車/慢行 (15 km/h)
+                    </button>
+                  </div>
+                </div>
+
+                {/* Compute and display multiple freeloader routes */}
+                {(() => {
+                  const routes = getMultiplePlantingRoutes("freeloader");
+                  if (routes.length === 0) {
+                    return (
+                      <div className="py-6 text-center text-xs text-slate-500 bg-slate-950/40 rounded-2xl border border-slate-800">
+                        ⚠️ 當前無可規劃的白嫖花卉點位！(最少需要 5 朵花)
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="space-y-4">
+                      <p className="text-[10px] text-slate-400 leading-relaxed bg-slate-950/40 p-2.5 rounded-xl border border-slate-800">
+                        💡 <strong>連續白嫖原理：</strong> 系統已自動將當前花卉點位以最少 5 朵大花白嫖（不需自己停留 6 分鐘種植，順路前往）為基準分組，推薦最優白嫖出發時間。點選卡片可於地圖高亮路線！
+                      </p>
+
+                      <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
+                        {routes.map((route, rIdx) => {
+                          const colorInfo = ROUTE_COLORS[rIdx % ROUTE_COLORS.length];
+                          const isSelected = selectedRouteIndex === rIdx;
+                          
+                          return (
+                            <div
+                              key={rIdx}
+                              onClick={() => {
+                                setSelectedRouteIndex(rIdx);
+                                if (mapRef.current && route.path.length > 0) {
+                                  mapRef.current.setView([route.path[0].lat, route.path[0].lng], 16);
+                                }
+                              }}
+                              className={`p-3.5 rounded-2xl border cursor-pointer transition duration-150 relative ${
+                                isSelected 
+                                  ? "bg-slate-900 border-2" 
+                                  : "bg-slate-950/60 border-slate-800/80 hover:border-slate-700"
+                              }`}
+                              style={isSelected ? { borderColor: colorInfo.hex } : {}}
+                            >
+                              {/* Color Badge Header */}
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: colorInfo.hex }} />
+                                  <span className="text-xs font-black text-slate-100">
+                                    白嫖路線 {rIdx + 1} ({colorInfo.name})
+                                  </span>
+                                </div>
+                                <span className="text-[11px] font-extrabold text-amber-400">
+                                  👑 {route.path.length} 朵大花白嫖
+                                </span>
+                              </div>
+
+                              {/* Info indicators */}
+                              <div className="grid grid-cols-2 gap-2 text-[10px] text-slate-300 mt-2">
+                                <div className="bg-slate-950/50 p-2 rounded-xl border border-slate-800/40">
+                                  <p className="text-slate-500 text-[9px]">建議收割時間</p>
+                                  <p className="font-bold text-emerald-400 mt-0.5">{route.recommendedStartTime}</p>
+                                </div>
+                                <div className="bg-slate-950/50 p-2 rounded-xl border border-slate-800/40">
+                                  <p className="text-slate-500 text-[9px]">總移動時長</p>
+                                  <p className="font-bold text-purple-400 mt-0.5">
+                                    {Math.floor(route.totalDuration / 60)} 分 {Math.round(route.totalDuration % 60)} 秒
+                                  </p>
+                                </div>
+                              </div>
+
+                              {/* Timeline detail inside selected item */}
+                              {isSelected && (
+                                <div className="mt-3 space-y-1 bg-slate-950/80 p-2.5 rounded-xl border border-slate-850/60 font-sans text-[10px]">
+                                  <p className="text-[9px] text-slate-500 font-bold mb-1.5">🧭 路線詳細步驟：</p>
+                                  {route.steps.map((step, idx) => {
+                                    const hNum = step.landmark.id;
+                                    const name = step.landmark.name;
+                                    if (step.type === "start") {
+                                      return (
+                                        <div key={idx} className="flex items-start gap-1.5 py-0.5">
+                                          <span className="bg-emerald-500/20 text-emerald-400 w-3.5 h-3.5 rounded-full flex items-center justify-center font-bold text-[8px] shrink-0 mt-0.5">起</span>
+                                          <span className="font-bold text-slate-200">#{hNum} {name} (白嫖起點)</span>
+                                        </div>
+                                      );
+                                    } else {
+                                      const distText = step.distance! >= 1000 
+                                        ? `${(step.distance! / 1000).toFixed(2)}km` 
+                                        : `${Math.round(step.distance!)}m`;
+                                      return (
+                                        <div key={idx} className="space-y-0.5">
+                                          <div className="pl-2 border-l border-dashed border-slate-800 text-[9px] text-slate-500">
+                                            ↓ 下站 {distText}
+                                          </div>
+                                          <div className="flex items-start gap-1.5 py-0.5">
+                                            <span className="bg-purple-500/20 text-purple-400 w-3.5 h-3.5 rounded-full flex items-center justify-center font-bold text-[8px] shrink-0 mt-0.5">{idx + 1}</span>
+                                            <span className="font-bold text-slate-200">#{hNum} {name}</span>
+                                          </div>
+                                        </div>
+                                      );
+                                    }
+                                  })}
+                                </div>
+                              )}
+
+                              {/* Direct Google Maps Navigation button */}
+                              <div className="mt-3">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const origin = `${route.path[0].lat},${route.path[0].lng}`;
+                                    const destination = `${route.path[route.path.length - 1].lat},${route.path[route.path.length - 1].lng}`;
+                                    let waypoints = "";
+                                    if (route.path.length > 2) {
+                                      const intermediate = route.path.slice(1, route.path.length - 1);
+                                      waypoints = intermediate.map(p => `${p.lat},${p.lng}`).join("|");
+                                    }
+                                    let gUrl = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}`;
+                                    if (waypoints) {
+                                      gUrl += `&waypoints=${encodeURIComponent(waypoints)}`;
+                                    }
+                                    gUrl += `&travelmode=${plantingSpeed === 5 ? "walking" : "bicycling"}`;
+                                    window.open(gUrl, "_blank");
+                                  }}
+                                  className="w-full text-white font-extrabold py-2.5 px-3 rounded-xl text-[11px] transition shadow-md flex items-center justify-center gap-1.5 hover:opacity-90 active:scale-95"
+                                  style={{ backgroundColor: colorInfo.hex }}
+                                >
+                                  <i className="fa-solid fa-map-location-dot"></i>
+                                  <span>開啟 {colorInfo.name} 路線 Google Maps 伸手黨白嫖導航</span>
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
             ) : (
               <div className="space-y-4 py-1">
                 {/* List of recommended spots */}
@@ -3607,12 +3850,31 @@ export default function App() {
                               </div>
                               
                               <div className="text-[10px] text-slate-300 space-y-1.5 my-2">
-                                <div className="flex flex-wrap gap-1">
-                                  {spot.coveredNames.map((name, nIdx) => (
-                                    <span key={nIdx} className="bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800 text-slate-400 text-[9px] whitespace-nowrap">
-                                      #{spot.coveredIds[nIdx]} {name}
-                                    </span>
-                                  ))}
+                                <div className="flex flex-wrap gap-1.5">
+                                  {(spot.coveredFlowers || []).map((flower, fIdx) => {
+                                    const isBlooming = flower.expire && new Date(flower.expire).getTime() > now;
+                                    const timeLabel = isBlooming 
+                                      ? `🍃 ${formatDateTimeShort(flower.expire)} 變葉` 
+                                      : "🍂 現為葉子";
+                                    
+                                    return (
+                                      <span 
+                                        key={fIdx} 
+                                        className={`px-2 py-0.5 rounded-lg border text-[9px] whitespace-nowrap flex items-center gap-1.5 transition ${
+                                          isBlooming
+                                            ? "bg-pink-950/40 border-pink-500/30 text-pink-300"
+                                            : "bg-emerald-950/40 border-emerald-500/30 text-emerald-300"
+                                        }`}
+                                      >
+                                        <strong className="text-[10px]">#{flower.id} {flower.name}</strong>
+                                        <span className={`px-1 py-0.2 rounded font-mono text-[8px] ${
+                                          isBlooming ? "bg-pink-900/50 text-pink-200" : "bg-emerald-900/50 text-emerald-200"
+                                        }`}>
+                                          {timeLabel}
+                                        </span>
+                                      </span>
+                                    );
+                                  })}
                                 </div>
                                 <div className="grid grid-cols-2 gap-2 mt-2">
                                   <div className="bg-slate-950/50 p-2 rounded-xl border border-slate-800/40">
