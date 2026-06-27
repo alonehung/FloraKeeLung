@@ -3672,11 +3672,25 @@ export default function App() {
                                   {route.steps.map((step, idx) => {
                                     const hNum = step.landmark.id;
                                     const name = step.landmark.name;
+                                    const landmark = step.landmark;
+                                    const leafTime = landmark.expire ? new Date(landmark.expire).getTime() : now;
+                                    const ribbonStart = leafTime + 15 * 60 * 1000;
+                                    const ribbonEnd = leafTime + 60 * 60 * 1000;
+                                    const formatTimeFromMs = (ms: number) => {
+                                      const d = new Date(ms);
+                                      return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+                                    };
+
                                     if (step.type === "start") {
                                       return (
-                                        <div key={idx} className="flex items-start gap-1.5 py-0.5">
+                                        <div key={idx} className="flex items-start gap-1.5 py-1">
                                           <span className="bg-emerald-500/20 text-emerald-400 w-3.5 h-3.5 rounded-full flex items-center justify-center font-bold text-[8px] shrink-0 mt-0.5">起</span>
-                                          <span className="font-bold text-slate-200">#{hNum} {name}</span>
+                                          <div className="flex flex-col">
+                                            <span className="font-bold text-slate-200">#{hNum} {name}</span>
+                                            <span className="text-[9px] text-cyan-400 font-medium mt-0.5">
+                                              🎗️ 預估飄帶：{formatTimeFromMs(ribbonStart)} ~ {formatTimeFromMs(ribbonEnd)}
+                                            </span>
+                                          </div>
                                         </div>
                                       );
                                     } else {
@@ -3688,9 +3702,14 @@ export default function App() {
                                           <div className="pl-2 border-l border-dashed border-slate-800 text-[9px] text-slate-500">
                                             ↓ 下站 {distText}
                                           </div>
-                                          <div className="flex items-start gap-1.5 py-0.5">
+                                          <div className="flex items-start gap-1.5 py-1">
                                             <span className="bg-purple-500/20 text-purple-400 w-3.5 h-3.5 rounded-full flex items-center justify-center font-bold text-[8px] shrink-0 mt-0.5">{idx + 1}</span>
-                                            <span className="font-bold text-slate-200">#{hNum} {name}</span>
+                                            <div className="flex flex-col">
+                                              <span className="font-bold text-slate-200">#{hNum} {name}</span>
+                                              <span className="text-[9px] text-cyan-400 font-medium mt-0.5">
+                                                🎗️ 預估飄帶：{formatTimeFromMs(ribbonStart)} ~ {formatTimeFromMs(ribbonEnd)}
+                                              </span>
+                                            </div>
                                           </div>
                                         </div>
                                       );
@@ -3834,11 +3853,25 @@ export default function App() {
                                   {route.steps.map((step, idx) => {
                                     const hNum = step.landmark.id;
                                     const name = step.landmark.name;
+                                    const landmark = step.landmark;
+                                    const leafTime = landmark.expire ? new Date(landmark.expire).getTime() : now;
+                                    const ribbonStart = leafTime + 15 * 60 * 1000;
+                                    const ribbonEnd = leafTime + 60 * 60 * 1000;
+                                    const formatTimeFromMs = (ms: number) => {
+                                      const d = new Date(ms);
+                                      return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+                                    };
+
                                     if (step.type === "start") {
                                       return (
-                                        <div key={idx} className="flex items-start gap-1.5 py-0.5">
+                                        <div key={idx} className="flex items-start gap-1.5 py-1">
                                           <span className="bg-emerald-500/20 text-emerald-400 w-3.5 h-3.5 rounded-full flex items-center justify-center font-bold text-[8px] shrink-0 mt-0.5">起</span>
-                                          <span className="font-bold text-slate-200">#{hNum} {name} (白嫖起點)</span>
+                                          <div className="flex flex-col">
+                                            <span className="font-bold text-slate-200">#{hNum} {name} (白嫖起點)</span>
+                                            <span className="text-[9px] text-cyan-400 font-medium mt-0.5">
+                                              🎗️ 預估飄帶：{formatTimeFromMs(ribbonStart)} ~ {formatTimeFromMs(ribbonEnd)}
+                                            </span>
+                                          </div>
                                         </div>
                                       );
                                     } else {
@@ -3850,9 +3883,14 @@ export default function App() {
                                           <div className="pl-2 border-l border-dashed border-slate-800 text-[9px] text-slate-500">
                                             ↓ 下站 {distText}
                                           </div>
-                                          <div className="flex items-start gap-1.5 py-0.5">
+                                          <div className="flex items-start gap-1.5 py-1">
                                             <span className="bg-purple-500/20 text-purple-400 w-3.5 h-3.5 rounded-full flex items-center justify-center font-bold text-[8px] shrink-0 mt-0.5">{idx + 1}</span>
-                                            <span className="font-bold text-slate-200">#{hNum} {name}</span>
+                                            <div className="flex flex-col">
+                                              <span className="font-bold text-slate-200">#{hNum} {name}</span>
+                                              <span className="text-[9px] text-cyan-400 font-medium mt-0.5">
+                                                🎗️ 預估飄帶：{formatTimeFromMs(ribbonStart)} ~ {formatTimeFromMs(ribbonEnd)}
+                                              </span>
+                                            </div>
                                           </div>
                                         </div>
                                       );
