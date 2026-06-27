@@ -280,7 +280,7 @@ const getHarvestWindow = (flower: { expire?: string | null }, currentTimeMs: num
 };
 
 // Helper to calculate earliest time at which at least 5 flowers in a circle are leaf simultaneously,
-// with the condition that the difference between the first and last flower becoming a leaf does not exceed 20 minutes.
+// with the condition that the difference between the first and last flower becoming a leaf does not exceed 15 minutes.
 const getEarliestForceBloomTimeForCircle = (circleFlowers: any[], currentTimeMs: number) => {
   if (circleFlowers.length < 5) return Infinity;
 
@@ -295,7 +295,7 @@ const getEarliestForceBloomTimeForCircle = (circleFlowers: any[], currentTimeMs:
     const minStart = starts[i];
     const maxStart = starts[i + 4];
 
-    if (maxStart - minStart <= 20 * 60 * 1000) {
+    if (maxStart - minStart <= 15 * 60 * 1000) {
       const earliestT = Math.max(currentTimeMs, maxStart);
       if (earliestT < bestTime) {
         bestTime = earliestT;
@@ -1032,44 +1032,81 @@ export default function App() {
         const speedMps = (plantingSpeed * 1000) / 3600;
 
         for (const perm of perms) {
-          let currentSMin = -Infinity;
-          let currentSMax = Infinity;
-          let accumulatedTravelTime = 0;
+          if (userRole === "planting") {
+            let totalDistance = 0;
+            for (let j = 1; j < 5; j++) {
+              totalDistance += getDistance(
+                flowers[perm[j - 1]].lat,
+                flowers[perm[j - 1]].lng,
+                flowers[perm[j]].lat,
+                flowers[perm[j]].lng
+              );
+            }
+            const totalTravelTime = totalDistance / speedMps;
+            const totalPlantingTime = 5 * 6 * 60;
+            if (totalTravelTime + totalPlantingTime > 90 * 60) {
+              continue; // Exceeds 90 mins limit
+            }
 
-          for (let j = 0; j < 5; j++) {
-            const currFlower = flowers[perm[j]];
-            
-            if (j > 0) {
+            let d_prev = flowers[perm[0]].windowStart + 6 * 60 * 1000;
+            let isValid = true;
+            for (let j = 1; j < 5; j++) {
+              const currFlower = flowers[perm[j]];
               const prevFlower = flowers[perm[j - 1]];
               const dist = getDistance(prevFlower.lat, prevFlower.lng, currFlower.lat, currFlower.lng);
-              accumulatedTravelTime += dist / speedMps;
+              const travelTimeMs = (dist / speedMps) * 1000;
+              const a_curr = d_prev + travelTimeMs;
+              if (a_curr > currFlower.windowStart) {
+                isValid = false;
+                break;
+              }
+              d_prev = currFlower.windowStart + 6 * 60 * 1000;
             }
-            
-            const plantingDelaySec = userRole === "freeloader" ? 0 : j * 6 * 60; // 6 mins per flower in seconds for planting, 0 for freeloader
-            const delayMs = (plantingDelaySec + accumulatedTravelTime) * 1000;
-            
-            const sMinForThis = currFlower.windowStart - delayMs;
-            const sMaxForThis = currFlower.windowEnd - delayMs;
 
-            if (sMinForThis > currentSMin) {
-              currentSMin = sMinForThis;
+            if (isValid) {
+              const startTimeMs = flowers[perm[0]].windowStart;
+              if (startTimeMs < bestSStartForGroup) {
+                bestSStartForGroup = startTimeMs;
+              }
             }
-            if (sMaxForThis < currentSMax) {
-              currentSMax = sMaxForThis;
+          } else {
+            // Freeloader (original overlap checks)
+            let currentSMin = -Infinity;
+            let currentSMax = Infinity;
+            let accumulatedTravelTime = 0;
+
+            for (let j = 0; j < 5; j++) {
+              const currFlower = flowers[perm[j]];
+              
+              if (j > 0) {
+                const prevFlower = flowers[perm[j - 1]];
+                const dist = getDistance(prevFlower.lat, prevFlower.lng, currFlower.lat, currFlower.lng);
+                accumulatedTravelTime += dist / speedMps;
+              }
+              
+              const delayMs = accumulatedTravelTime * 1000;
+              
+              const sMinForThis = currFlower.windowStart - delayMs;
+              const sMaxForThis = currFlower.windowEnd - delayMs;
+
+              if (sMinForThis > currentSMin) {
+                currentSMin = sMinForThis;
+              }
+              if (sMaxForThis < currentSMax) {
+                currentSMax = sMaxForThis;
+              }
             }
-          }
 
-          // Total duration of the planting route (30 mins of planting + travel time, or just travel time for freeloader)
-          const totalDurationSec = (userRole === "freeloader" ? 0 : 5 * 6 * 60) + accumulatedTravelTime;
-          const maxDurationSec = userRole === "freeloader" ? 45 * 60 : 90 * 60;
-          if (totalDurationSec > maxDurationSec) {
-            continue; // Strictly reject permutations exceeding max duration (45 mins for freeloader, 90 mins for planting)
-          }
+            const totalDurationSec = accumulatedTravelTime;
+            if (totalDurationSec > 45 * 60) {
+              continue;
+            }
 
-          const earliestValidS = Math.max(now, currentSMin);
-          if (earliestValidS <= currentSMax) {
-            if (earliestValidS < bestSStartForGroup) {
-              bestSStartForGroup = earliestValidS;
+            const earliestValidS = Math.max(now, currentSMin);
+            if (earliestValidS <= currentSMax) {
+              if (earliestValidS < bestSStartForGroup) {
+                bestSStartForGroup = earliestValidS;
+              }
             }
           }
         }
@@ -1234,38 +1271,52 @@ export default function App() {
         return { isValid: false };
       }
 
-      let currentSMin = -Infinity;
-      let currentSMax = Infinity;
-      let accumulatedTravelTime = 0;
+      if (activeRole === "planting") {
+        let d_prev = getLeafWindow(testPath[0], now).start + 6 * 60 * 1000;
+        for (let i = 1; i < testPath.length; i++) {
+          const l_curr = getLeafWindow(testPath[i], now).start;
+          const dist = getDistance(testPath[i - 1].lat, testPath[i - 1].lng, testPath[i].lat, testPath[i].lng);
+          const travelTimeMs = (dist / speedMps) * 1000;
+          const a_curr = d_prev + travelTimeMs;
+          if (a_curr > l_curr) {
+            return { isValid: false };
+          }
+          d_prev = l_curr + 6 * 60 * 1000;
+        }
+        return { isValid: true };
+      } else {
+        let currentSMin = -Infinity;
+        let currentSMax = Infinity;
+        let accumulatedTravelTime = 0;
 
-      for (let j = 0; j < testPath.length; j++) {
-        const currFlower = testPath[j];
-        const window = activeRole === "freeloader" ? getHarvestWindow(currFlower, now) : getLeafWindow(currFlower, now);
-        
-        if (j > 0) {
-          const prevFlower = testPath[j - 1];
-          const dist = getDistance(prevFlower.lat, prevFlower.lng, currFlower.lat, currFlower.lng);
-          accumulatedTravelTime += dist / speedMps;
-        }
-        
-        const plantingDelaySec = activeRole === "freeloader" ? 0 : j * 6 * 60;
-        const delayMs = (plantingDelaySec + accumulatedTravelTime) * 1000;
-        
-        const sMinForThis = window.start - delayMs;
-        const sMaxForThis = window.end - delayMs;
+        for (let j = 0; j < testPath.length; j++) {
+          const currFlower = testPath[j];
+          const window = getHarvestWindow(currFlower, now);
+          
+          if (j > 0) {
+            const prevFlower = testPath[j - 1];
+            const dist = getDistance(prevFlower.lat, prevFlower.lng, currFlower.lat, currFlower.lng);
+            accumulatedTravelTime += dist / speedMps;
+          }
+          
+          const delayMs = accumulatedTravelTime * 1000;
+          
+          const sMinForThis = window.start - delayMs;
+          const sMaxForThis = window.end - delayMs;
 
-        if (sMinForThis > currentSMin) {
-          currentSMin = sMinForThis;
+          if (sMinForThis > currentSMin) {
+            currentSMin = sMinForThis;
+          }
+          if (sMaxForThis < currentSMax) {
+            currentSMax = sMaxForThis;
+          }
         }
-        if (sMaxForThis < currentSMax) {
-          currentSMax = sMaxForThis;
-        }
+
+        const earliestValidS = Math.max(now, currentSMin);
+        const isValid = earliestValidS <= currentSMax;
+
+        return { isValid };
       }
-
-      const earliestValidS = Math.max(now, currentSMin);
-      const isValid = earliestValidS <= currentSMax;
-
-      return { isValid };
     };
 
     // Helper to calculate route details for a given ordered path
@@ -1300,34 +1351,6 @@ export default function App() {
       const totalPlantingTime = activeRole === "freeloader" ? 0 : path.length * 6 * 60; // 0 mins for freeloader, 6 mins per flower in seconds for planting
       const totalDuration = totalTravelTime + totalPlantingTime;
 
-      let currentSMin = -Infinity;
-      let currentSMax = Infinity;
-      let accumulatedTravelTime = 0;
-
-      for (let j = 0; j < path.length; j++) {
-        const currFlower = path[j];
-        const window = activeRole === "freeloader" ? getHarvestWindow(currFlower, now) : getLeafWindow(currFlower, now);
-        
-        if (j > 0) {
-          const prevFlower = path[j - 1];
-          const dist = getDistance(prevFlower.lat, prevFlower.lng, currFlower.lat, currFlower.lng);
-          accumulatedTravelTime += dist / speedMps;
-        }
-        
-        const plantingDelaySec = activeRole === "freeloader" ? 0 : j * 6 * 60; // 6 mins per flower in seconds
-        const delayMs = (plantingDelaySec + accumulatedTravelTime) * 1000;
-        
-        const sMinForThis = window.start - delayMs;
-        const sMaxForThis = window.end - delayMs;
-
-        if (sMinForThis > currentSMin) {
-          currentSMin = sMinForThis;
-        }
-        if (sMaxForThis < currentSMax) {
-          currentSMax = sMaxForThis;
-        }
-      }
-
       let recommendedStartTime = "無符合時間的路線";
       let startTimeMs = Infinity;
 
@@ -1338,25 +1361,89 @@ export default function App() {
           ? "總時間超過 45 分鐘上限 (請切換交通工具)" 
           : "總時間超過 90 分鐘上限 (請切換交通工具)";
       } else {
-        const earliestValidS = Math.max(now, currentSMin);
-        if (earliestValidS <= currentSMax) {
-          startTimeMs = earliestValidS;
-          if (earliestValidS <= now) {
-            recommendedStartTime = "可立即出發";
-          } else {
-            const dateObj = new Date(earliestValidS);
-            const dateStr = `${(dateObj.getMonth() + 1).toString().padStart(2, '0')}/${dateObj.getDate().toString().padStart(2, '0')}`;
-            recommendedStartTime = `${dateStr} ${dateObj.getHours().toString().padStart(2, '0')}:${dateObj.getMinutes().toString().padStart(2, '0')} 出發`;
+        if (activeRole === "planting") {
+          let d_prev = getLeafWindow(path[0], now).start + 6 * 60 * 1000;
+          let isValid = true;
+          for (let i = 1; i < path.length; i++) {
+            const l_curr = getLeafWindow(path[i], now).start;
+            const dist = getDistance(path[i - 1].lat, path[i - 1].lng, path[i].lat, path[i].lng);
+            const travelTimeMs = (dist / speedMps) * 1000;
+            const a_curr = d_prev + travelTimeMs;
+            if (a_curr > l_curr) {
+              isValid = false;
+              break;
+            }
+            d_prev = l_curr + 6 * 60 * 1000;
           }
 
-          // Compute arrivalTimeMs for each step based on the decided startTimeMs
-          let accumulatedTime = 0;
-          for (let j = 0; j < steps.length; j++) {
-            if (j > 0) {
-              accumulatedTime += (steps[j].travelTime || 0);
+          if (isValid) {
+            startTimeMs = getLeafWindow(path[0], now).start;
+            if (startTimeMs <= now) {
+              recommendedStartTime = "可立即出發";
+            } else {
+              const dateObj = new Date(startTimeMs);
+              const dateStr = `${(dateObj.getMonth() + 1).toString().padStart(2, '0')}/${dateObj.getDate().toString().padStart(2, '0')}`;
+              recommendedStartTime = `${dateStr} ${dateObj.getHours().toString().padStart(2, '0')}:${dateObj.getMinutes().toString().padStart(2, '0')} 出發`;
             }
-            const plantingDelay = activeRole === "freeloader" ? 0 : j * 6 * 60;
-            steps[j].arrivalTimeMs = startTimeMs + (accumulatedTime + plantingDelay) * 1000;
+
+            steps[0].arrivalTimeMs = startTimeMs;
+            let d_prev_ms = startTimeMs + 6 * 60 * 1000;
+            for (let i = 1; i < steps.length; i++) {
+              const dist = getDistance(path[i - 1].lat, path[i - 1].lng, path[i].lat, path[i].lng);
+              const travelTimeMs = (dist / speedMps) * 1000;
+              steps[i].arrivalTimeMs = d_prev_ms + travelTimeMs;
+              const l_curr = getLeafWindow(path[i], now).start;
+              d_prev_ms = l_curr + 6 * 60 * 1000;
+            }
+          }
+        } else {
+          // freeloader
+          let currentSMin = -Infinity;
+          let currentSMax = Infinity;
+          let accumulatedTravelTime = 0;
+
+          for (let j = 0; j < path.length; j++) {
+            const currFlower = path[j];
+            const window = getHarvestWindow(currFlower, now);
+            
+            if (j > 0) {
+              const prevFlower = path[j - 1];
+              const dist = getDistance(prevFlower.lat, prevFlower.lng, currFlower.lat, currFlower.lng);
+              accumulatedTravelTime += dist / speedMps;
+            }
+            
+            const delayMs = accumulatedTravelTime * 1000;
+            
+            const sMinForThis = window.start - delayMs;
+            const sMaxForThis = window.end - delayMs;
+
+            if (sMinForThis > currentSMin) {
+              currentSMin = sMinForThis;
+            }
+            if (sMaxForThis < currentSMax) {
+              currentSMax = sMaxForThis;
+            }
+          }
+
+          const earliestValidS = Math.max(now, currentSMin);
+          if (earliestValidS <= currentSMax) {
+            startTimeMs = earliestValidS;
+            if (earliestValidS <= now) {
+              recommendedStartTime = "可立即出發";
+            } else {
+              const dateObj = new Date(earliestValidS);
+              const dateStr = `${(dateObj.getMonth() + 1).toString().padStart(2, '0')}/${dateObj.getDate().toString().padStart(2, '0')}`;
+              recommendedStartTime = `${dateStr} ${dateObj.getHours().toString().padStart(2, '0')}:${dateObj.getMinutes().toString().padStart(2, '0')} 出發`;
+            }
+
+            // Compute arrivalTimeMs for each step based on the decided startTimeMs
+            let accumulatedTime = 0;
+            for (let j = 0; j < steps.length; j++) {
+              if (j > 0) {
+                accumulatedTime += (steps[j].travelTime || 0);
+              }
+              steps[j].arrivalTimeMs = startTimeMs + accumulatedTime * 1000;
+            }
           }
         }
       }
@@ -1503,7 +1590,7 @@ export default function App() {
 
     if (targets.length === 0) return [];
 
-    const spots: {
+      const spots: {
       lat: number;
       lng: number;
       coveredIds: number[];
@@ -1512,7 +1599,7 @@ export default function App() {
       maxDist: number;
       recommendedStartTime: string;
       startTimeMs: number;
-      totalDuration: number; // 30 mins
+      totalDuration: number; // 15 mins
       flowersCount: number;
     }[] = [];
     let uncovered = [...targets];
@@ -1569,7 +1656,7 @@ export default function App() {
             maxDist,
             recommendedStartTime,
             startTimeMs: bestForceBloomTime,
-            totalDuration: 30 * 60, // 30 mins in seconds
+            totalDuration: 15 * 60, // 15 mins in seconds
             flowersCount: coveredByCentroid.length
           };
         }
@@ -2011,7 +2098,7 @@ export default function App() {
             <strong style="color: ${colorInfo.hex}">🎯 駐點 ${sIdx + 1} (${colorInfo.name})</strong><br/>
             建議：<strong>${spot.recommendedStartTime}</strong><br/>
             覆蓋：${spot.coveredIds.length} 朵<br/>
-            時長：定點強開 30 分鐘
+            時長：定點強開 15 分鐘
           </div>
         `);
 
@@ -2037,7 +2124,7 @@ export default function App() {
             <strong style="color: ${colorInfo.hex}">🎯 駐點 ${sIdx + 1} (${colorInfo.name})</strong><br/>
             建議：<strong>${spot.recommendedStartTime}</strong><br/>
             覆蓋：${spot.coveredIds.length} 朵<br/>
-            時長：定點強開 30 分鐘
+            時長：定點強開 15 分鐘
           </div>
         `);
 
