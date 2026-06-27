@@ -168,25 +168,26 @@ const getDistance = (lat1: number, lng1: number, lat2: number, lng2: number): nu
   return R * c; // in meters
 };
 
-// Helper to get the leaf window of a flower in Taiwan's high-density context (leaves last 15 mins max before being planted)
+// Helper to get the leaf window of a flower (leaves last indefinitely until bloomed again)
 const getLeafWindow = (flower: { expire?: string | null }, currentTimeMs: number) => {
   const expireTime = flower.expire ? new Date(flower.expire).getTime() : 0;
   if (expireTime > currentTimeMs) {
     // Currently blooming, will expire and become a leaf at expireTime
     return {
       start: expireTime,
-      end: expireTime + 15 * 60 * 1000
+      end: Infinity
     };
   } else {
     // Currently a leaf
     return {
       start: currentTimeMs,
-      end: currentTimeMs + 15 * 60 * 1000
+      end: Infinity
     };
   }
 };
 
-// Helper to calculate earliest time at which at least 5 flowers in a circle are leaf simultaneously
+// Helper to calculate earliest time at which at least 5 flowers in a circle are leaf simultaneously,
+// with the condition that the difference between the first and last flower becoming a leaf does not exceed 20 minutes.
 const getEarliestForceBloomTimeForCircle = (circleFlowers: any[], currentTimeMs: number) => {
   if (circleFlowers.length < 5) return Infinity;
 
@@ -198,17 +199,13 @@ const getEarliestForceBloomTimeForCircle = (circleFlowers: any[], currentTimeMs:
   let bestTime = Infinity;
 
   for (let i = 0; i <= starts.length - 5; i++) {
-    const groupStarts = starts.slice(i, i + 5);
-    const minStart = groupStarts[0];
-    const maxStart = groupStarts[4];
+    const minStart = starts[i];
+    const maxStart = starts[i + 4];
 
-    if (maxStart - minStart <= 15 * 60 * 1000) {
+    if (maxStart - minStart <= 20 * 60 * 1000) {
       const earliestT = Math.max(currentTimeMs, maxStart);
-      const minEnd = minStart + 15 * 60 * 1000;
-      if (earliestT <= minEnd) {
-        if (earliestT < bestTime) {
-          bestTime = earliestT;
-        }
+      if (earliestT < bestTime) {
+        bestTime = earliestT;
       }
     }
   }
@@ -965,6 +962,12 @@ export default function App() {
             }
           }
 
+          // Total duration of the planting route (30 mins of planting + travel time)
+          const totalDurationSec = (5 * 6 * 60) + accumulatedTravelTime;
+          if (totalDurationSec > 90 * 60) {
+            continue; // Strictly reject permutations exceeding 90 minutes
+          }
+
           const earliestValidS = Math.max(now, currentSMin);
           if (earliestValidS <= currentSMax) {
             if (earliestValidS < bestSStartForGroup) {
@@ -993,7 +996,7 @@ export default function App() {
       bestGroup.forEach(f => clusterIds.add(f.id));
 
       if (bestStartTime === Infinity) {
-        recommendedPlantingTime = "無符合時間的5花點路線";
+        recommendedPlantingTime = "無符合(或總時間超90分)之5花點路線";
       } else if (bestStartTime <= now) {
         recommendedPlantingTime = "可立即出發 (滿足5花點)";
       } else {
@@ -1167,15 +1170,20 @@ export default function App() {
 
       let recommendedStartTime = "無符合時間的路線";
       let startTimeMs = Infinity;
-      const earliestValidS = Math.max(now, currentSMin);
-      if (earliestValidS <= currentSMax) {
-        startTimeMs = earliestValidS;
-        if (earliestValidS <= now) {
-          recommendedStartTime = "可立即出發";
-        } else {
-          const dateObj = new Date(earliestValidS);
-          const dateStr = `${(dateObj.getMonth() + 1).toString().padStart(2, '0')}/${dateObj.getDate().toString().padStart(2, '0')}`;
-          recommendedStartTime = `${dateStr} ${dateObj.getHours().toString().padStart(2, '0')}:${dateObj.getMinutes().toString().padStart(2, '0')} 出發`;
+
+      if (totalDuration > 90 * 60) {
+        recommendedStartTime = "總時間超過 90 分鐘上限 (請切換交通工具)";
+      } else {
+        const earliestValidS = Math.max(now, currentSMin);
+        if (earliestValidS <= currentSMax) {
+          startTimeMs = earliestValidS;
+          if (earliestValidS <= now) {
+            recommendedStartTime = "可立即出發";
+          } else {
+            const dateObj = new Date(earliestValidS);
+            const dateStr = `${(dateObj.getMonth() + 1).toString().padStart(2, '0')}/${dateObj.getDate().toString().padStart(2, '0')}`;
+            recommendedStartTime = `${dateStr} ${dateObj.getHours().toString().padStart(2, '0')}:${dateObj.getMinutes().toString().padStart(2, '0')} 出發`;
+          }
         }
       }
 
