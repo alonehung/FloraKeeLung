@@ -168,20 +168,20 @@ const getDistance = (lat1: number, lng1: number, lat2: number, lng2: number): nu
   return R * c; // in meters
 };
 
-// Helper to get the leaf window of a flower (leaves last indefinitely until bloomed again)
+// Helper to get the leaf window of a flower (leaves last for 30 minutes in a high-density urban area before being planted)
 const getLeafWindow = (flower: { expire?: string | null }, currentTimeMs: number) => {
   const expireTime = flower.expire ? new Date(flower.expire).getTime() : 0;
   if (expireTime > currentTimeMs) {
     // Currently blooming, will expire and become a leaf at expireTime
     return {
       start: expireTime,
-      end: Infinity
+      end: expireTime + 30 * 60 * 1000
     };
   } else {
     // Currently a leaf
     return {
       start: currentTimeMs,
-      end: Infinity
+      end: currentTimeMs + 30 * 60 * 1000
     };
   }
 };
