@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, ReactNode } from "react";
+import QRCode from "qrcode";
 
 // Declare external globals from CDN
 declare const L: any;
@@ -1258,6 +1259,329 @@ export default function App() {
     setIsNavLocating(false);
     showToast("🚗 已改用首站為起點規劃導航！");
     playSynthChime();
+  };
+
+  const downloadRouteImage = async (route: any, colorInfo: any, rIdx: number) => {
+    try {
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
+      const steps = route.steps;
+      const numSteps = steps.length;
+      
+      // Dynamic Height calculation
+      const headerHeight = 220;
+      const stepSpacing = 140;
+      const extraBottomPadding = 80; // Add ~80px gap after the last station before the footer
+      const footerHeight = 240 + extraBottomPadding;
+      const canvasWidth = 600;
+      const canvasHeight = headerHeight + (numSteps - 1) * stepSpacing + footerHeight;
+
+      canvas.width = canvasWidth;
+      canvas.height = canvasHeight;
+
+      // 1. Background Gradient (deep cosmic space style)
+      const bgGrad = ctx.createLinearGradient(0, 0, 0, canvasHeight);
+      bgGrad.addColorStop(0, "#0b0f19"); // Deep Cosmic Navy
+      bgGrad.addColorStop(1, "#020617"); // Dark Space Black
+      ctx.fillStyle = bgGrad;
+      ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+
+      // Subtle background grid lines decoration (Keelung street style map effect)
+      ctx.strokeStyle = "rgba(148, 163, 184, 0.05)";
+      ctx.lineWidth = 1;
+      for (let i = 40; i < canvasWidth; i += 40) {
+        ctx.beginPath();
+        ctx.moveTo(i, 0);
+        ctx.lineTo(i, canvasHeight);
+        ctx.stroke();
+      }
+      for (let i = 40; i < canvasHeight; i += 40) {
+        ctx.beginPath();
+        ctx.moveTo(0, i);
+        ctx.lineTo(canvasWidth, i);
+        ctx.stroke();
+      }
+
+      // 2. Draw Header Card Area
+      const drawRoundedRect = (x: number, y: number, w: number, h: number, r: number, fill = true, stroke = true) => {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + w - r, y);
+        ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+        ctx.lineTo(x + w, y + h - r);
+        ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        ctx.lineTo(x + r, y + h);
+        ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+        if (fill) ctx.fill();
+        if (stroke) ctx.stroke();
+      };
+
+      // Header container box
+      ctx.fillStyle = "rgba(30, 41, 59, 0.6)";
+      ctx.strokeStyle = "rgba(148, 163, 184, 0.15)";
+      ctx.lineWidth = 1.5;
+      drawRoundedRect(30, 30, canvasWidth - 60, 160, 16);
+
+      // Title
+      ctx.font = "bold 22px 'PingFang TC', 'Microsoft JhengHei', sans-serif";
+      ctx.fillStyle = "#ffffff";
+      ctx.textAlign = "center";
+      ctx.fillText(`大花路線：輕鬆收飄帶`, canvasWidth / 2, 65);
+
+      // Metrics columns inside the header box
+      const metricsY = 105;
+      const colWidth = (canvasWidth - 80) / 3;
+
+      // Col 1: Total Flowers
+      ctx.font = "12px 'PingFang TC', 'Microsoft JhengHei', sans-serif";
+      ctx.fillStyle = "#94a3b8"; // slate-400
+      ctx.fillText("總計大花", 40 + colWidth / 2, metricsY);
+      ctx.font = "bold 15px 'PingFang TC', 'Microsoft JhengHei', sans-serif";
+      ctx.fillStyle = "#f59e0b"; // amber-400
+      ctx.fillText(`👑 ${route.path.length} 朵大花`, 40 + colWidth / 2, metricsY + 28);
+
+      // Col 2: Total Duration
+      ctx.font = "12px 'PingFang TC', 'Microsoft JhengHei', sans-serif";
+      ctx.fillStyle = "#94a3b8";
+      ctx.fillText("預計時間", 40 + colWidth * 1.5, metricsY);
+      ctx.font = "bold 15px 'PingFang TC', 'Microsoft JhengHei', sans-serif";
+      ctx.fillStyle = "#c084fc"; // purple-400
+      ctx.fillText(`⏱️ ${Math.floor(route.totalDuration / 60)}分${Math.round(route.totalDuration % 60)}秒`, 40 + colWidth * 1.5, metricsY + 28);
+
+      // Col 3: Start Time
+      ctx.font = "12px 'PingFang TC', 'Microsoft JhengHei', sans-serif";
+      ctx.fillStyle = "#94a3b8";
+      ctx.fillText("建議出發", 40 + colWidth * 2.5, metricsY);
+      ctx.font = "bold 15px 'PingFang TC', 'Microsoft JhengHei', sans-serif";
+      ctx.fillStyle = "#10b981"; // emerald-500
+      ctx.fillText(`📅 ${route.recommendedStartTime}`, 40 + colWidth * 2.5, metricsY + 28);
+
+      // 3. Draw Timeline Steps
+      const centerX = canvasWidth / 2;
+      const firstStepY = headerHeight + 35;
+      const lastStepY = headerHeight + 35 + (numSteps - 1) * stepSpacing;
+      
+      // Draw primary path vertical timeline line in the center
+      const lineGrad = ctx.createLinearGradient(centerX, firstStepY, centerX, lastStepY);
+      lineGrad.addColorStop(0, "#10b981"); // emerald
+      lineGrad.addColorStop(0.5, "#ec4899"); // pink
+      lineGrad.addColorStop(1, "#f59e0b"); // amber
+      
+      ctx.strokeStyle = lineGrad;
+      ctx.lineWidth = 4;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(centerX, firstStepY);
+      ctx.lineTo(centerX, lastStepY);
+      ctx.stroke();
+
+      // Top flag icon decoration at starting node
+      ctx.font = "20px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("🚩", centerX, firstStepY - 26);
+
+      // Crown icon decoration at ending node
+      ctx.fillText("👑", centerX, lastStepY + 36);
+
+      // Loop over and draw steps
+      steps.forEach((step: any, idx: number) => {
+        const stepY = firstStepY + idx * stepSpacing;
+        const isStart = step.type === "start";
+        const isEnd = idx === numSteps - 1;
+        const isEven = idx % 2 === 0;
+
+        // Draw walking distance step connector if not first
+        if (idx > 0) {
+          const prevStepY = stepY - stepSpacing;
+          const dist = step.distance || 0;
+          const distText = dist >= 1000 
+            ? `${(dist / 1000).toFixed(2)}km` 
+            : `${Math.round(dist)}m`;
+
+          // Draw small walking indicator beside the central line
+          const midY = (prevStepY + stepY) / 2;
+          ctx.fillStyle = "#94a3b8";
+          ctx.font = "11px 'PingFang TC', sans-serif";
+          ctx.textAlign = isEven ? "left" : "right";
+          const textX = isEven ? centerX + 18 : centerX - 18;
+          ctx.fillText(`🚶 下站 ${distText}`, textX, midY + 4);
+        }
+
+        // Draw Node Circle
+        ctx.beginPath();
+        ctx.arc(centerX, stepY, 14, 0, Math.PI * 2);
+        if (isStart) {
+          ctx.fillStyle = "#10b981"; // Emerald
+        } else if (isEnd) {
+          ctx.fillStyle = "#f59e0b"; // Amber
+        } else {
+          ctx.fillStyle = "#2563eb"; // Blue
+        }
+        ctx.fill();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // Node index text (inside circle)
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 11px 'PingFang TC', sans-serif";
+        ctx.textAlign = "center";
+        const textLabel = isStart ? "起" : isEnd ? "終" : `${idx + 1}`;
+        ctx.fillText(textLabel, centerX, stepY + 4);
+
+        // Draw Landmark Info Card (Alternating left & right)
+        const cardW = 225;
+        const cardH = 88;
+        const cardX = isEven ? centerX - cardW - 25 : centerX + 25;
+        const cardY = stepY - cardH / 2;
+
+        ctx.fillStyle = "rgba(15, 23, 42, 0.85)";
+        ctx.strokeStyle = isStart ? "rgba(16, 185, 129, 0.35)" : isEnd ? "rgba(245, 158, 11, 0.35)" : "rgba(37, 99, 235, 0.35)";
+        ctx.lineWidth = 1.2;
+        drawRoundedRect(cardX, cardY, cardW, cardH, 12);
+
+        // Helper to draw wrapped landmark title text
+        const hNum = step.landmark.id;
+        const name = step.landmark.name;
+        const titleText = `${isStart ? "📍 " : ""}${isEnd ? "🏁 " : ""}#${hNum} ${name}`;
+
+        ctx.font = "bold 11px 'PingFang TC', 'Microsoft JhengHei', sans-serif";
+        ctx.fillStyle = "#f8fafc"; // slate-50
+        ctx.textAlign = "left";
+
+        const drawWrappedText = (text: string, x: number, y: number, maxWidth: number, lineHeight: number) => {
+          const chars = text.split("");
+          let line = "";
+          let lines: string[] = [];
+          for (let n = 0; n < chars.length; n++) {
+            let testLine = line + chars[n];
+            let metrics = ctx.measureText(testLine);
+            if (metrics.width > maxWidth && n > 0) {
+              lines.push(line);
+              line = chars[n];
+            } else {
+              line = testLine;
+            }
+          }
+          lines.push(line);
+          if (lines.length > 2) {
+            lines = lines.slice(0, 2);
+            lines[1] = lines[1].slice(0, -2) + "...";
+          }
+          lines.forEach((l, i) => {
+            ctx.fillText(l, x, y + (i * lineHeight));
+          });
+        };
+
+        drawWrappedText(titleText, cardX + 12, cardY + 22, cardW - 24, 14);
+
+        // Draw timing windows
+        const landmark = step.landmark;
+        const isBlooming = landmark.expire ? new Date(landmark.expire).getTime() > Date.now() : false;
+        const leafTime = isBlooming ? new Date(landmark.expire!).getTime() : Date.now();
+        const ribbonStart = leafTime + 15 * 60 * 1000;
+        const ribbonEnd = leafTime + 60 * 60 * 1000;
+        
+        const formatTimeFromMs = (ms: number) => {
+          const d = new Date(ms);
+          return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+        };
+
+        ctx.font = "10px sans-serif";
+        ctx.fillStyle = "#22d3ee"; // cyan-400
+        ctx.fillText(`🎗️ 飄帶：${formatTimeFromMs(ribbonStart)} ~ ${formatTimeFromMs(ribbonEnd)}`, cardX + 12, cardY + 54);
+
+        ctx.fillStyle = "#f472b6"; // pink-400
+        const arrTimeText = step.arrivalTimeMs ? formatTimeFromMs(step.arrivalTimeMs) : "立即";
+        ctx.fillText(`⏱️ 預估抵達：${arrTimeText}`, cardX + 12, cardY + 70);
+      });
+
+      // 4. Footer Card Area with Watermarks, Website, QR code
+      const footerY = canvasHeight - footerHeight + 35 + extraBottomPadding;
+
+      // Draw horizontal divider line
+      ctx.strokeStyle = "rgba(148, 163, 184, 0.1)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(30, footerY - 15);
+      ctx.lineTo(canvasWidth - 30, footerY - 15);
+      ctx.stroke();
+
+      // Left Footer
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 15px 'PingFang TC', sans-serif";
+      ctx.textAlign = "left";
+      ctx.fillText("路線完成！收穫豐富 💐", 30, footerY + 15);
+
+      ctx.font = "11px 'PingFang TC', sans-serif";
+      ctx.fillStyle = "#94a3b8"; // slate-400
+      ctx.fillText("Project 花嶼雞籠 Beta 版", 30, footerY + 40);
+
+      ctx.font = "11px sans-serif";
+      ctx.fillStyle = "#f59e0b"; // amber-400
+      ctx.fillText("網址：https://alonehung.github.io/FloraKeeLung/", 30, footerY + 60);
+
+      ctx.fillStyle = "rgba(148, 163, 184, 0.35)";
+      ctx.font = "9px sans-serif";
+      ctx.fillText("官方推薦：Keelung Flower Planner Auto-Generated Image Map", 30, footerY + 80);
+
+      // Right Footer: Generate and Draw QR code
+      try {
+        const qrDataUrl = await QRCode.toDataURL("https://alonehung.github.io/FloraKeeLung/", {
+          margin: 1,
+          width: 90,
+          color: {
+            dark: "#0b0f19",
+            light: "#ffffff"
+          }
+        });
+
+        const qrImage = new Image();
+        qrImage.src = qrDataUrl;
+        await new Promise((resolve) => {
+          qrImage.onload = resolve;
+        });
+
+        const qrX = canvasWidth - 120;
+        const qrY = footerY - 5;
+        const qrSize = 90;
+
+        // Draw white frame background for QR code
+        ctx.fillStyle = "#ffffff";
+        drawRoundedRect(qrX - 5, qrY - 5, qrSize + 10, qrSize + 10, 10, true, false);
+
+        ctx.drawImage(qrImage, qrX, qrY, qrSize, qrSize);
+
+        ctx.font = "9px 'PingFang TC', sans-serif";
+        ctx.fillStyle = "#ffffff";
+        ctx.textAlign = "center";
+        ctx.fillText("掃描規劃路線", qrX + qrSize / 2, qrY + qrSize + 16);
+      } catch (qrErr) {
+        console.error("Failed to render QR Code inside Canvas footer", qrErr);
+      }
+
+      // 5. Trigger download
+      const dataUrl = canvas.toDataURL("image/png");
+      const d = new Date();
+      const imgName = `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日收花專用路線圖.png`;
+
+      const link = document.createElement("a");
+      link.href = dataUrl;
+      link.setAttribute("download", imgName);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      showToast(`📥 已成功導出「${imgName}」路線圖檔！`);
+    } catch (err) {
+      console.error("Canvas route image generation failed", err);
+      showToast("❌ 路線圖檔生成失敗，請重試！");
+    }
   };
 
   const getMultiplePlantingRoutes = (roleOverride?: "planting" | "freeloader") => {
@@ -4324,6 +4648,20 @@ export default function App() {
                                 >
                                   <i className="fa-solid fa-download text-pink-400"></i>
                                   <span>生成並下載 {colorInfo.name} 路線 GPX 軌跡檔</span>
+                                </button>
+                              </div>
+
+                              {/* Route Image generation button */}
+                              <div className="mt-2">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    downloadRouteImage(route, colorInfo, rIdx);
+                                  }}
+                                  className="w-full bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700/60 font-extrabold py-2 px-3 rounded-xl text-[11px] transition shadow-md flex items-center justify-center gap-1.5 active:scale-95"
+                                >
+                                  <i className="fa-solid fa-file-image text-emerald-400"></i>
+                                  <span>生成並下載 {colorInfo.name} 路線圖 (手機直式分享)</span>
                                 </button>
                               </div>
                             </div>
