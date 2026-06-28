@@ -4281,6 +4281,51 @@ export default function App() {
                                   <span>開啟 {colorInfo.name} 路線 Google Maps 輕鬆收飄帶導航</span>
                                 </button>
                               </div>
+
+                              {/* GPX Generation button */}
+                              <div className="mt-2">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const index = rIdx + 1;
+                                    const gpxContent = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Keelung Flower Planner" xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata>
+    <name>輕鬆收飄帶路線 ${index} (${colorInfo.name})</name>
+    <desc>基隆大花導航與精算系統 - 輕鬆收飄帶最佳規劃路線</desc>
+  </metadata>
+  ${route.path.map((p, idx) => `  <wpt lat="${p.lat}" lon="${p.lng}">
+    <name>${idx + 1}. ${p.name}</name>
+  </wpt>`).join("\n")}
+  <trk>
+    <name>輕鬆收飄帶路線 ${index} (${colorInfo.name})</name>
+    <trkseg>
+      ${route.path.map(p => `      <trkpt lat="${p.lat}" lon="${p.lng}">
+        <name>${p.name}</name>
+      </trkpt>`).join("\n")}
+    </trkseg>
+  </trk>
+</gpx>`;
+
+                                    const blob = new Blob([gpxContent], { type: "application/gpx+xml;charset=utf-8;" });
+                                    const url = URL.createObjectURL(blob);
+                                    const link = document.createElement("a");
+                                    link.href = url;
+                                    const d = new Date();
+                                    const fileName = `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日收花專用.gpx`;
+                                    link.setAttribute("download", fileName);
+                                    document.body.appendChild(link);
+                                    link.click();
+                                    document.body.removeChild(link);
+                                    URL.revokeObjectURL(url);
+                                    showToast(`📥 已成功導出「${fileName}」的 GPX 檔案！`);
+                                  }}
+                                  className="w-full bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700/60 font-extrabold py-2 px-3 rounded-xl text-[11px] transition shadow-md flex items-center justify-center gap-1.5 active:scale-95"
+                                >
+                                  <i className="fa-solid fa-download text-pink-400"></i>
+                                  <span>生成並下載 {colorInfo.name} 路線 GPX 軌跡檔</span>
+                                </button>
+                              </div>
                             </div>
                           );
                         })}
