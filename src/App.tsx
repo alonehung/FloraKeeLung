@@ -282,7 +282,7 @@ const getHarvestWindow = (flower: { expire?: string | null }, currentTimeMs: num
 // Helper to calculate earliest time at which at least 5 flowers in a circle are leaf simultaneously,
 // with the condition that the difference between the first and last flower becoming a leaf does not exceed 15 minutes.
 const getEarliestForceBloomTimeForCircle = (circleFlowers: any[], currentTimeMs: number) => {
-  if (circleFlowers.length < 5) return { bestTime: Infinity, bestFlowers: [] };
+  if (circleFlowers.length < 5) return { bestTime: Infinity, bestDurationSec: 0, bestFlowers: [] };
 
   const starts = circleFlowers.map(f => {
     const expireTime = f.expire ? new Date(f.expire).getTime() : 0;
@@ -293,6 +293,7 @@ const getEarliestForceBloomTimeForCircle = (circleFlowers: any[], currentTimeMs:
   }).sort((a, b) => a.expireTime - b.expireTime);
 
   let bestTime = Infinity;
+  let bestDurationSec = 15 * 60; // default 15 minutes
   let bestFlowers: any[] = [];
 
   for (let i = 0; i <= starts.length - 5; i++) {
@@ -300,17 +301,24 @@ const getEarliestForceBloomTimeForCircle = (circleFlowers: any[], currentTimeMs:
     const maxStart = starts[i + 4].expireTime;
 
     if (maxStart - minStart <= 15 * 60 * 1000) {
-      const earliestT = Math.max(currentTimeMs, maxStart);
+      // Force bloom must start immediately when the first flower of the group turns into a leaf (no waiting)
+      const earliestT = Math.max(currentTimeMs, minStart);
       if (earliestT < bestTime) {
         bestTime = earliestT;
         bestFlowers = starts
           .filter(s => s.expireTime >= minStart && s.expireTime <= minStart + 15 * 60 * 1000)
           .map(s => s.flower);
+
+        // The total duration is calculated from the start of force blooming (Math.max(currentTimeMs, minStart))
+        // to the end of force blooming the last flower in the 15-min window (Math.max(currentTimeMs, maxStart) + 15 minutes)
+        const startMs = Math.max(currentTimeMs, minStart);
+        const endMs = Math.max(currentTimeMs, maxStart) + 15 * 60 * 1000;
+        bestDurationSec = (endMs - startMs) / 1000;
       }
     }
   }
 
-  return { bestTime, bestFlowers };
+  return { bestTime, bestDurationSec, bestFlowers };
 };
 
 export default function App() {
@@ -1056,6 +1064,14 @@ export default function App() {
               totalDistance += dist;
               const travelTimeMs = (dist / speedMps) * 1000;
               const a_curr = d_prev + travelTimeMs;
+
+              // Ensure arrival is before the flower turns into a leaf (if currently blooming)
+              const expireTime = currFlower.expire ? new Date(currFlower.expire).getTime() : 0;
+              if (expireTime > now && a_curr > expireTime) {
+                isValid = false;
+                break;
+              }
+
               if (a_curr > currFlower.windowEnd) {
                 isValid = false;
                 break;
@@ -1068,7 +1084,8 @@ export default function App() {
 
             if (isValid) {
               const totalDurationSec = (d_prev - now) / 1000;
-              if (totalDurationSec <= 90 * 60) {
+              // Planting route maximum duration is 60 minutes
+              if (totalDurationSec <= 60 * 60) {
                 const startTimeMs = S;
                 if (startTimeMs < bestSStartForGroup) {
                   bestSStartForGroup = startTimeMs;
@@ -1139,7 +1156,7 @@ export default function App() {
       if (bestStartTime === Infinity) {
         recommendedPlantingTime = userRole === "freeloader" 
           ? "無符合(或總時間超45分)之5花伸手黨路線" 
-          : "無符合(或總時間超90分)之5花點路線";
+          : "無符合(或總時間超60分)之5花點路線";
       } else if (bestStartTime <= now) {
         recommendedPlantingTime = userRole === "freeloader"
           ? "可立即出發 (滿足伸手黨條件)"
@@ -1290,6 +1307,13 @@ export default function App() {
           const dist = getDistance(testPath[i - 1].lat, testPath[i - 1].lng, testPath[i].lat, testPath[i].lng);
           const travelTimeMs = (dist / speedMps) * 1000;
           const a_curr = d_prev + travelTimeMs;
+
+          // Ensure arrival is before the flower turns into a leaf (if currently blooming)
+          const expireTime = testPath[i].expire ? new Date(testPath[i].expire!).getTime() : 0;
+          if (expireTime > now && a_curr > expireTime) {
+            return { isValid: false };
+          }
+
           if (a_curr > window.end) {
             return { isValid: false };
           }
@@ -1373,7 +1397,7 @@ export default function App() {
       let startTimeMs = Infinity;
       let finalTotalDuration = totalTravelTime + totalPlantingTime;
 
-      const maxDurationSec = activeRole === "freeloader" ? 45 * 60 : 90 * 60;
+      const maxDurationSec = activeRole === "freeloader" ? 45 * 60 : 60 * 60;
 
       if (activeRole === "planting") {
         const firstWindow = getLeafWindow(path[0], now);
@@ -1389,6 +1413,14 @@ export default function App() {
             const dist = getDistance(path[i - 1].lat, path[i - 1].lng, path[i].lat, path[i].lng);
             const travelTimeMs = (dist / speedMps) * 1000;
             const a_curr = d_prev + travelTimeMs;
+
+            // Ensure arrival is before the flower turns into a leaf (if currently blooming)
+            const expireTime = path[i].expire ? new Date(path[i].expire!).getTime() : 0;
+            if (expireTime > now && a_curr > expireTime) {
+              isValid = false;
+              break;
+            }
+
             if (a_curr > window.end) {
               isValid = false;
               break;
@@ -1406,7 +1438,7 @@ export default function App() {
           finalTotalDuration = (d_prev - now) / 1000;
 
           if (finalTotalDuration > maxDurationSec) {
-            recommendedStartTime = "總時間超過 90 分鐘上限 (請切換交通工具)";
+            recommendedStartTime = "總時間超過 60 分鐘上限 (請切換交通工具)";
           } else {
             startTimeMs = S;
             if (startTimeMs <= now) {
@@ -1512,7 +1544,7 @@ export default function App() {
       path.push(curr);
       unassigned.splice(startIdx, 1);
 
-      const maxDurationSec = activeRole === "freeloader" ? 45 * 60 : 90 * 60;
+      const maxDurationSec = activeRole === "freeloader" ? 45 * 60 : 60 * 60;
 
       // Greedily find the nearest 4 unassigned neighbors
       for (let k = 0; k < 4; k++) {
@@ -1607,10 +1639,15 @@ export default function App() {
       routes.push(calculateRouteDetails(unassigned));
     }
 
-    // Sort routes by recommended startTime (earliest first) and exclude those with no matching time
+    // Sort routes by covered flowers count descending (most fruits first), then recommended startTime (earliest first)
     return routes
-      .filter(r => r.recommendedStartTime !== "無符合時間的路線")
-      .sort((a, b) => a.startTimeMs - b.startTimeMs);
+      .filter(r => r.recommendedStartTime !== "無符合時間的路線" && !r.recommendedStartTime.includes("超過"))
+      .sort((a, b) => {
+        if (b.path.length !== a.path.length) {
+          return b.path.length - a.path.length; // Descending order of fruit count
+        }
+        return a.startTimeMs - b.startTimeMs; // Ascending order of start time
+      });
   };
 
   const getMultipleForceBloomRoutes = () => {
@@ -1653,7 +1690,7 @@ export default function App() {
         const cLng = sumLng / nearby.length;
 
         const coveredByCentroid = targets.filter(t => getDistance(cLat, cLng, t.lat, t.lng) <= 500);
-        const { bestTime: bestForceBloomTime, bestFlowers: validFlowers } = getEarliestForceBloomTimeForCircle(coveredByCentroid, now);
+        const { bestTime: bestForceBloomTime, bestDurationSec, bestFlowers: validFlowers } = getEarliestForceBloomTimeForCircle(coveredByCentroid, now);
 
         if (bestForceBloomTime === Infinity || validFlowers.length < 5) continue;
 
@@ -1690,7 +1727,7 @@ export default function App() {
             maxDist,
             recommendedStartTime,
             startTimeMs: bestForceBloomTime,
-            totalDuration: 15 * 60, // 15 mins in seconds
+            totalDuration: bestDurationSec,
             flowersCount: validFlowers.length
           };
         }
@@ -1705,8 +1742,15 @@ export default function App() {
       }
     }
 
-    // Filter to only those covering at least 5 flowers
-    return spots.filter(s => s.coveredIds.length >= 5).sort((a, b) => a.startTimeMs - b.startTimeMs);
+    // Filter to only those covering at least 5 flowers and sort by count descending, then start time ascending
+    return spots
+      .filter(s => s.coveredIds.length >= 5)
+      .sort((a, b) => {
+        if (b.coveredIds.length !== a.coveredIds.length) {
+          return b.coveredIds.length - a.coveredIds.length; // Descending order of fruit count
+        }
+        return a.startTimeMs - b.startTimeMs; // Ascending order of start time
+      });
   };
 
   const handleExportSelectedRoute = () => {
@@ -4223,10 +4267,16 @@ export default function App() {
                                     );
                                   })}
                                 </div>
-                                <div className="grid grid-cols-2 gap-2 mt-2">
+                                <div className="grid grid-cols-3 gap-2 mt-2">
                                   <div className="bg-slate-950/50 p-2 rounded-xl border border-slate-800/40">
                                     <p className="text-slate-500 text-[9px]">建議強開時間</p>
                                     <p className="font-bold text-amber-400 mt-0.5">{spot.recommendedStartTime}</p>
+                                  </div>
+                                  <div className="bg-slate-950/50 p-2 rounded-xl border border-slate-800/40">
+                                    <p className="text-slate-500 text-[9px]">預估強開時長</p>
+                                    <p className="font-bold text-purple-400 mt-0.5">
+                                      {Math.floor(spot.totalDuration / 60)} 分 {Math.round(spot.totalDuration % 60)} 秒
+                                    </p>
                                   </div>
                                   <div className="bg-slate-950/50 p-2 rounded-xl border border-slate-800/40">
                                     <p className="text-slate-500 text-[9px]">最遠大花距離</p>
