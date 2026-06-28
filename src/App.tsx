@@ -1048,11 +1048,26 @@ export default function App() {
 
         for (const perm of perms) {
           if (userRole === "planting") {
-            let S = Math.max(now, flowers[perm[0]].windowStart);
-            if (S > flowers[perm[0]].windowEnd) {
+            const firstFlower = flowers[perm[0]];
+            const firstExpire = firstFlower.expire ? new Date(firstFlower.expire).getTime() : 0;
+            
+            let S = now;
+            if (firstExpire > now) {
+              const maxS = firstExpire - 60 * 1000;
+              if (now > maxS) {
+                continue; // Cannot arrive at least 1 minute before leaf transition
+              }
+              S = maxS;
+            } else {
+              S = now;
+            }
+
+            if (S > firstFlower.windowEnd) {
               continue;
             }
-            let d_prev = S + 6 * 60 * 1000;
+            
+            const firstStart = Math.max(S, firstFlower.windowStart);
+            let d_prev = firstStart + 6 * 60 * 1000;
             let isValid = true;
             let totalWaitTimeMs = 0;
             let totalDistance = 0;
@@ -1065,9 +1080,9 @@ export default function App() {
               const travelTimeMs = (dist / speedMps) * 1000;
               const a_curr = d_prev + travelTimeMs;
 
-              // Ensure arrival is before the flower turns into a leaf (if currently blooming)
+              // Ensure arrival is at least 1 minute before the flower turns into a leaf (if currently blooming)
               const expireTime = currFlower.expire ? new Date(currFlower.expire).getTime() : 0;
-              if (expireTime > now && a_curr > expireTime) {
+              if (expireTime > now && a_curr > (expireTime - 60 * 1000)) {
                 isValid = false;
                 break;
               }
@@ -1083,7 +1098,7 @@ export default function App() {
             }
 
             if (isValid) {
-              const totalDurationSec = (d_prev - now) / 1000;
+              const totalDurationSec = (d_prev - S) / 1000;
               // Planting route maximum duration is 60 minutes
               if (totalDurationSec <= 60 * 60) {
                 const startTimeMs = S;
@@ -1093,7 +1108,7 @@ export default function App() {
               }
             }
           } else {
-            // Freeloader (original overlap checks)
+            // Freeloader (original overlap checks with 30 minutes limit)
             let currentSMin = -Infinity;
             let currentSMax = Infinity;
             let accumulatedTravelTime = 0;
@@ -1121,7 +1136,7 @@ export default function App() {
             }
 
             const totalDurationSec = accumulatedTravelTime;
-            if (totalDurationSec > 45 * 60) {
+            if (totalDurationSec > 30 * 60) {
               continue;
             }
 
@@ -1155,7 +1170,7 @@ export default function App() {
 
       if (bestStartTime === Infinity) {
         recommendedPlantingTime = userRole === "freeloader" 
-          ? "無符合(或總時間超45分)之5花伸手黨路線" 
+          ? "無符合(或總時間超30分)之5花伸手黨路線" 
           : "無符合(或總時間超60分)之5花點路線";
       } else if (bestStartTime <= now) {
         recommendedPlantingTime = userRole === "freeloader"
@@ -1295,12 +1310,26 @@ export default function App() {
       }
 
       if (activeRole === "planting") {
-        const firstWindow = getLeafWindow(testPath[0], now);
-        let S = Math.max(now, firstWindow.start);
+        const firstFlower = testPath[0];
+        const firstExpire = firstFlower.expire ? new Date(firstFlower.expire).getTime() : 0;
+        let S = now;
+        if (firstExpire > now) {
+          const maxS = firstExpire - 60 * 1000;
+          if (now > maxS) {
+            return { isValid: false }; // Cannot arrive 1 minute before leaf transition
+          }
+          S = maxS;
+        } else {
+          S = now;
+        }
+
+        const firstWindow = getLeafWindow(firstFlower, now);
         if (S > firstWindow.end) {
           return { isValid: false };
         }
-        let d_prev = S + 6 * 60 * 1000;
+        
+        const firstStart = Math.max(S, firstWindow.start);
+        let d_prev = firstStart + 6 * 60 * 1000;
 
         for (let i = 1; i < testPath.length; i++) {
           const window = getLeafWindow(testPath[i], now);
@@ -1308,9 +1337,9 @@ export default function App() {
           const travelTimeMs = (dist / speedMps) * 1000;
           const a_curr = d_prev + travelTimeMs;
 
-          // Ensure arrival is before the flower turns into a leaf (if currently blooming)
+          // Ensure arrival is at least 1 minute before the flower turns into a leaf (if currently blooming)
           const expireTime = testPath[i].expire ? new Date(testPath[i].expire!).getTime() : 0;
-          if (expireTime > now && a_curr > expireTime) {
+          if (expireTime > now && a_curr > (expireTime - 60 * 1000)) {
             return { isValid: false };
           }
 
@@ -1321,7 +1350,7 @@ export default function App() {
           d_prev = s_curr + 6 * 60 * 1000;
         }
 
-        const totalDuration = (d_prev - now) / 1000;
+        const totalDuration = (d_prev - S) / 1000;
         if (totalDuration > maxDurationSec) {
           return { isValid: false };
         }
@@ -1355,7 +1384,7 @@ export default function App() {
         }
 
         const earliestValidS = Math.max(now, currentSMin);
-        const isValid = earliestValidS <= currentSMax;
+        const isValid = earliestValidS <= currentSMax && accumulatedTravelTime <= maxDurationSec;
 
         return { isValid };
       }
@@ -1397,14 +1426,27 @@ export default function App() {
       let startTimeMs = Infinity;
       let finalTotalDuration = totalTravelTime + totalPlantingTime;
 
-      const maxDurationSec = activeRole === "freeloader" ? 45 * 60 : 60 * 60;
+      const maxDurationSec = activeRole === "freeloader" ? 30 * 60 : 60 * 60;
 
       if (activeRole === "planting") {
-        const firstWindow = getLeafWindow(path[0], now);
-        let S = Math.max(now, firstWindow.start);
-        let isValid = S <= firstWindow.end;
+        const firstFlower = path[0];
+        const firstExpire = firstFlower.expire ? new Date(firstFlower.expire).getTime() : 0;
+        let S = now;
+        if (firstExpire > now) {
+          const maxS = firstExpire - 60 * 1000;
+          if (now <= maxS) {
+            S = maxS;
+          }
+        }
         
-        let d_prev = S + 6 * 60 * 1000;
+        const firstWindow = getLeafWindow(firstFlower, now);
+        let isValid = S <= firstWindow.end;
+        if (firstExpire > now && now > firstExpire - 60 * 1000) {
+          isValid = false;
+        }
+        
+        const firstStart = Math.max(S, firstWindow.start);
+        let d_prev = firstStart + 6 * 60 * 1000;
         let tempWaitMs = 0;
 
         if (isValid) {
@@ -1414,9 +1456,9 @@ export default function App() {
             const travelTimeMs = (dist / speedMps) * 1000;
             const a_curr = d_prev + travelTimeMs;
 
-            // Ensure arrival is before the flower turns into a leaf (if currently blooming)
+            // Ensure arrival is at least 1 minute before the flower turns into a leaf (if currently blooming)
             const expireTime = path[i].expire ? new Date(path[i].expire!).getTime() : 0;
-            if (expireTime > now && a_curr > expireTime) {
+            if (expireTime > now && a_curr > (expireTime - 60 * 1000)) {
               isValid = false;
               break;
             }
@@ -1433,9 +1475,9 @@ export default function App() {
         }
 
         if (isValid) {
-          const firstWaitMs = Math.max(0, firstWindow.start - now);
+          const firstWaitMs = Math.max(0, firstWindow.start - S);
           totalWaitTime = (firstWaitMs + tempWaitMs) / 1000;
-          finalTotalDuration = (d_prev - now) / 1000;
+          finalTotalDuration = (d_prev - S) / 1000;
 
           if (finalTotalDuration > maxDurationSec) {
             recommendedStartTime = "總時間超過 60 分鐘上限 (請切換交通工具)";
@@ -1448,17 +1490,17 @@ export default function App() {
               const dateStr = `${(dateObj.getMonth() + 1).toString().padStart(2, '0')}/${dateObj.getDate().toString().padStart(2, '0')}`;
               recommendedStartTime = `${dateStr} ${dateObj.getHours().toString().padStart(2, '0')}:${dateObj.getMinutes().toString().padStart(2, '0')} 出發`;
             }
+          }
 
-            steps[0].arrivalTimeMs = startTimeMs;
-            let d_prev_ms = startTimeMs + 6 * 60 * 1000;
-            for (let i = 1; i < steps.length; i++) {
-              const dist = getDistance(path[i - 1].lat, path[i - 1].lng, path[i].lat, path[i].lng);
-              const travelTimeMs = (dist / speedMps) * 1000;
-              steps[i].arrivalTimeMs = d_prev_ms + travelTimeMs;
-              const window = getLeafWindow(path[i], now);
-              const s_curr = Math.max(steps[i].arrivalTimeMs, window.start);
-              d_prev_ms = s_curr + 6 * 60 * 1000;
-            }
+          steps[0].arrivalTimeMs = startTimeMs;
+          let d_prev_ms = firstStart + 6 * 60 * 1000;
+          for (let i = 1; i < steps.length; i++) {
+            const dist = getDistance(path[i - 1].lat, path[i - 1].lng, path[i].lat, path[i].lng);
+            const travelTimeMs = (dist / speedMps) * 1000;
+            steps[i].arrivalTimeMs = d_prev_ms + travelTimeMs;
+            const window = getLeafWindow(path[i], now);
+            const s_curr = Math.max(steps[i].arrivalTimeMs, window.start);
+            d_prev_ms = s_curr + 6 * 60 * 1000;
           }
         }
       } else {
@@ -1491,7 +1533,7 @@ export default function App() {
         }
 
         const earliestValidS = Math.max(now, currentSMin);
-        if (earliestValidS <= currentSMax && finalTotalDuration <= maxDurationSec) {
+        if (earliestValidS <= currentSMax && accumulatedTravelTime <= maxDurationSec) {
           startTimeMs = earliestValidS;
           if (earliestValidS <= now) {
             recommendedStartTime = "可立即出發";
@@ -1509,8 +1551,9 @@ export default function App() {
             }
             steps[j].arrivalTimeMs = startTimeMs + accumulatedTime * 1000;
           }
-        } else if (finalTotalDuration > maxDurationSec) {
-          recommendedStartTime = "總時間超過 45 分鐘上限 (請切換交通工具)";
+          finalTotalDuration = accumulatedTravelTime;
+        } else if (accumulatedTravelTime > maxDurationSec) {
+          recommendedStartTime = "總時間超過 30 分鐘上限 (請切換交通工具)";
         }
       }
 
@@ -1526,117 +1569,169 @@ export default function App() {
       };
     };
 
-    // Partition unassigned targets into routes of size 5
-    while (unassigned.length >= 5) {
-      // Find starting point (prioritize earliest windowStart)
-      let startIdx = 0;
-      let earliestStart = Infinity;
-      for (let i = 0; i < unassigned.length; i++) {
-        const window = activeRole === "freeloader" ? getHarvestWindow(unassigned[i], now) : getLeafWindow(unassigned[i], now);
-        if (window.start < earliestStart) {
-          earliestStart = window.start;
-          startIdx = i;
-        }
-      }
-
-      const path: typeof targets = [];
-      let curr = unassigned[startIdx];
-      path.push(curr);
-      unassigned.splice(startIdx, 1);
-
-      const maxDurationSec = activeRole === "freeloader" ? 45 * 60 : 60 * 60;
-
-      // Greedily find the nearest 4 unassigned neighbors
-      for (let k = 0; k < 4; k++) {
-        if (unassigned.length === 0) break;
-        
-        let bestIdx = -1;
-        let bestDist = Infinity;
-        
-        for (let i = 0; i < unassigned.length; i++) {
-          const candidate = unassigned[i];
-          const testPath = [...path, candidate];
-          const compat = testRouteCompatibility(testPath, activeRole, speedMps, maxDurationSec);
-          
-          if (compat.isValid) {
-            const d = getDistance(curr.lat, curr.lng, candidate.lat, candidate.lng);
-            if (d < bestDist) {
-              bestDist = d;
-              bestIdx = i;
-            }
-          }
-        }
-        
-        if (bestIdx !== -1) {
-          curr = unassigned[bestIdx];
-          path.push(curr);
-          unassigned.splice(bestIdx, 1);
-        } else {
-          // Fallback: nearest neighbor regardless of compatibility
-          let fallbackIdx = 0;
-          let fallbackDist = Infinity;
-          for (let i = 0; i < unassigned.length; i++) {
-            const d = getDistance(curr.lat, curr.lng, unassigned[i].lat, unassigned[i].lng);
-            if (d < fallbackDist) {
-              fallbackDist = d;
-              fallbackIdx = i;
-            }
-          }
-          curr = unassigned[fallbackIdx];
-          path.push(curr);
-          unassigned.splice(fallbackIdx, 1);
-        }
-      }
-
-      // Calculate details and add
-      routes.push(calculateRouteDetails(path));
-    }
-
-    // If there are left-over targets (fewer than 5) and we already have at least one route:
-    // Append each remaining target to its nearest route end/start point.
-    if (unassigned.length > 0 && routes.length > 0) {
+    if (activeRole === "freeloader") {
+      const maxDurationSec = 30 * 60;
       while (unassigned.length > 0) {
-        const item = unassigned[0];
-        let bestRouteIdx = 0;
-        let bestDist = Infinity;
-        let appendTo = "end"; // or "start"
+        // Find starting point (prioritize earliest harvest window start)
+        let startIdx = 0;
+        let earliestStart = Infinity;
+        for (let i = 0; i < unassigned.length; i++) {
+          const window = getHarvestWindow(unassigned[i], now);
+          if (window.start < earliestStart) {
+            earliestStart = window.start;
+            startIdx = i;
+          }
+        }
 
-        for (let r = 0; r < routes.length; r++) {
-          const routePath = routes[r].path;
-          const startPt = routePath[0];
-          const endPt = routePath[routePath.length - 1];
+        const path: typeof targets = [];
+        let curr = unassigned[startIdx];
+        path.push(curr);
+        unassigned.splice(startIdx, 1);
+
+        // Greedily append the nearest unassigned neighbor that maintains route compatibility
+        while (unassigned.length > 0) {
+          let bestIdx = -1;
+          let bestDist = Infinity;
           
-          const distToStart = getDistance(item.lat, item.lng, startPt.lat, startPt.lng);
-          const distToEnd = getDistance(item.lat, item.lng, endPt.lat, endPt.lng);
-
-          if (distToStart < bestDist) {
-            bestDist = distToStart;
-            bestRouteIdx = r;
-            appendTo = "start";
+          for (let i = 0; i < unassigned.length; i++) {
+            const candidate = unassigned[i];
+            const testPath = [...path, candidate];
+            const compat = testRouteCompatibility(testPath, "freeloader", speedMps, maxDurationSec);
+            
+            if (compat.isValid) {
+              const d = getDistance(curr.lat, curr.lng, candidate.lat, candidate.lng);
+              if (d < bestDist) {
+                bestDist = d;
+                bestIdx = i;
+              }
+            }
           }
-          if (distToEnd < bestDist) {
-            bestDist = distToEnd;
-            bestRouteIdx = r;
-            appendTo = "end";
+          
+          if (bestIdx !== -1) {
+            curr = unassigned[bestIdx];
+            path.push(curr);
+            unassigned.splice(bestIdx, 1);
+          } else {
+            // No more compatible neighbors can be appended
+            break;
           }
         }
 
-        // Insert/append the item to the best route
-        const targetRoute = routes[bestRouteIdx];
-        let newPath = [...targetRoute.path];
-        if (appendTo === "start") {
-          newPath.unshift(item);
-        } else {
-          newPath.push(item);
-        }
-
-        // Re-calculate the route details
-        routes[bestRouteIdx] = calculateRouteDetails(newPath);
-        unassigned.splice(0, 1);
+        // Calculate details and add
+        routes.push(calculateRouteDetails(path));
       }
-    } else if (unassigned.length > 0 && routes.length === 0) {
-      // If total targets < 5, just put them all into a single route of length < 5
-      routes.push(calculateRouteDetails(unassigned));
+    } else {
+      // Planting mode - partition into groups of size 5
+      const maxDurationSec = 60 * 60;
+      while (unassigned.length >= 5) {
+        // Find starting point (prioritize earliest windowStart)
+        let startIdx = 0;
+        let earliestStart = Infinity;
+        for (let i = 0; i < unassigned.length; i++) {
+          const window = getLeafWindow(unassigned[i], now);
+          if (window.start < earliestStart) {
+            earliestStart = window.start;
+            startIdx = i;
+          }
+        }
+
+        const path: typeof targets = [];
+        let curr = unassigned[startIdx];
+        path.push(curr);
+        unassigned.splice(startIdx, 1);
+
+        // Greedily find the nearest 4 unassigned neighbors
+        for (let k = 0; k < 4; k++) {
+          if (unassigned.length === 0) break;
+          
+          let bestIdx = -1;
+          let bestDist = Infinity;
+          
+          for (let i = 0; i < unassigned.length; i++) {
+            const candidate = unassigned[i];
+            const testPath = [...path, candidate];
+            const compat = testRouteCompatibility(testPath, "planting", speedMps, maxDurationSec);
+            
+            if (compat.isValid) {
+              const d = getDistance(curr.lat, curr.lng, candidate.lat, candidate.lng);
+              if (d < bestDist) {
+                bestDist = d;
+                bestIdx = i;
+              }
+            }
+          }
+          
+          if (bestIdx !== -1) {
+            curr = unassigned[bestIdx];
+            path.push(curr);
+            unassigned.splice(bestIdx, 1);
+          } else {
+            // Fallback: nearest neighbor regardless of compatibility
+            let fallbackIdx = 0;
+            let fallbackDist = Infinity;
+            for (let i = 0; i < unassigned.length; i++) {
+              const d = getDistance(curr.lat, curr.lng, unassigned[i].lat, unassigned[i].lng);
+              if (d < fallbackDist) {
+                fallbackDist = d;
+                fallbackIdx = i;
+              }
+            }
+            curr = unassigned[fallbackIdx];
+            path.push(curr);
+            unassigned.splice(fallbackIdx, 1);
+          }
+        }
+
+        // Calculate details and add
+        routes.push(calculateRouteDetails(path));
+      }
+
+      // If there are left-over targets (fewer than 5) and we already have at least one route:
+      // Append each remaining target to its nearest route end/start point.
+      if (unassigned.length > 0 && routes.length > 0) {
+        while (unassigned.length > 0) {
+          const item = unassigned[0];
+          let bestRouteIdx = 0;
+          let bestDist = Infinity;
+          let appendTo = "end"; // or "start"
+
+          for (let r = 0; r < routes.length; r++) {
+            const routePath = routes[r].path;
+            const startPt = routePath[0];
+            const endPt = routePath[routePath.length - 1];
+            
+            const distToStart = getDistance(item.lat, item.lng, startPt.lat, startPt.lng);
+            const distToEnd = getDistance(item.lat, item.lng, endPt.lat, endPt.lng);
+
+            if (distToStart < bestDist) {
+              bestDist = distToStart;
+              bestRouteIdx = r;
+              appendTo = "start";
+            }
+            if (distToEnd < bestDist) {
+              bestDist = distToEnd;
+              bestRouteIdx = r;
+              appendTo = "end";
+            }
+          }
+
+          // Insert/append the item to the best route
+          const targetRoute = routes[bestRouteIdx];
+          let newPath = [...targetRoute.path];
+          if (appendTo === "start") {
+            newPath.unshift(item);
+          } else {
+            newPath.push(item);
+          }
+
+          // Re-calculate the route details
+          routes[bestRouteIdx] = calculateRouteDetails(newPath);
+          unassigned.splice(0, 1);
+        }
+      } else if (unassigned.length > 0 && routes.length === 0) {
+        // If total targets < 5, just put them all into a single route of length < 5
+        routes.push(calculateRouteDetails(unassigned));
+      }
     }
 
     // Sort routes by covered flowers count descending (most fruits first), then recommended startTime (earliest first)
