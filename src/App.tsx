@@ -355,7 +355,10 @@ export default function App() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showGPXModal, setShowGPXModal] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
-  const [showNavModal, setShowNavModal] = useState(false);
+  const [showNavModal, setShowNavModal] = useState(() => {
+    const saved = localStorage.getItem("user_role");
+    return (saved === "planting" || saved === "force_bloom" || saved === "freeloader");
+  });
   const [navGoogleUrl, setNavGoogleUrl] = useState("");
   const [navAppleUrl, setNavAppleUrl] = useState("");
   const [navPath, setNavPath] = useState<{ id: number; name: string }[]>([]);
@@ -385,7 +388,10 @@ export default function App() {
   const [gpxText, setGpxText] = useState("");
 
   // Planner & Route Customizations
-  const [navModalTab, setNavModalTab] = useState<"planting" | "force_bloom" | "freeloader">("planting");
+  const [navModalTab, setNavModalTab] = useState<"planting" | "force_bloom" | "freeloader" >(() => {
+    const saved = localStorage.getItem("user_role");
+    return (saved === "planting" || saved === "force_bloom" || saved === "freeloader") ? (saved as any) : "planting";
+  });
   const [selectedRole, setSelectedRole] = useState<"planting" | "force_bloom" | "freeloader" | null>(null);
 
   const handleLoginSubmit = () => {
@@ -397,6 +403,7 @@ export default function App() {
     } else {
       setNavModalTab(selectedRole);
     }
+    setShowNavModal(true);
     showToast("🌸 歡迎使用基隆大花導航與精算系統！");
     playSynthChime();
   };
