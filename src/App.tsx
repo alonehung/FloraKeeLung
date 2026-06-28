@@ -346,6 +346,8 @@ export default function App() {
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
   const [googleUserEmail, setGoogleUserEmail] = useState<string | null>(null);
   const [hasEditPermission, setHasEditPermission] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSyncedTime, setLastSyncedTime] = useState<Date | null>(null);
 
   // Command panel
   const [commandInput, setCommandInput] = useState("");
@@ -759,78 +761,81 @@ export default function App() {
       return;
     }
 
+    setIsSyncing(true);
     showToast("🔄 正在載入雲端試算表...");
 
-    // Try reading via public JSONP format (No auth required, bypasses CORS perfectly) if no accessToken
-    if (!accessToken) {
-      try {
-        const loadedLandmarks = await fetchSheetViaJSONP(sheetId);
-        if (loadedLandmarks && loadedLandmarks.length > 0) {
-          setLandmarks(loadedLandmarks);
-          localStorage.setItem(`${LOCAL_STORAGE_KEY_PREFIX}_master_list`, JSON.stringify(loadedLandmarks));
-          centerMapOnLandmarks(loadedLandmarks);
-          showToast("📥 免登入唯讀載入完成！");
-          playSynthChime();
-          return;
-        }
-      } catch (e) {
-        console.error("Public JSONP read failed, trying CSV export fallback", e);
+    try {
+      // Try reading via public JSONP format (No auth required, bypasses CORS perfectly) if no accessToken
+      if (!accessToken) {
         try {
-          const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
-          const response = await fetch(csvUrl);
-          if (response.ok) {
-            const csvText = await response.text();
-            const rows = parseCSV(csvText);
+          const loadedLandmarks = await fetchSheetViaJSONP(sheetId);
+          if (loadedLandmarks && loadedLandmarks.length > 0) {
+            setLandmarks(loadedLandmarks);
+            localStorage.setItem(`${LOCAL_STORAGE_KEY_PREFIX}_master_list`, JSON.stringify(loadedLandmarks));
+            centerMapOnLandmarks(loadedLandmarks);
+            showToast("📥 免登入唯讀載入完成！");
+            setLastSyncedTime(new Date());
+            playSynthChime();
+            return;
+          }
+        } catch (e) {
+          console.error("Public JSONP read failed, trying CSV export fallback", e);
+          try {
+            const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
+            const response = await fetch(csvUrl);
+            if (response.ok) {
+              const csvText = await response.text();
+              const rows = parseCSV(csvText);
 
-            if (rows && rows.length > 0) {
-              let startIndex = 0;
-              if (rows[0] && rows[0][0]) {
-                const firstCellVal = String(rows[0][0]).trim();
-                if (firstCellVal !== "" && isNaN(Number(firstCellVal))) {
-                  startIndex = 1;
+              if (rows && rows.length > 0) {
+                let startIndex = 0;
+                if (rows[0] && rows[0][0]) {
+                  const firstCellVal = String(rows[0][0]).trim();
+                  if (firstCellVal !== "" && isNaN(Number(firstCellVal))) {
+                    startIndex = 1;
+                  }
+                }
+
+                const loadedLandmarks: Landmark[] = [];
+                for (let i = startIndex; i < rows.length; i++) {
+                  const row = rows[i];
+                  if (!row || row.length < 4 || !row[0]) continue;
+                  const lat = parseFloat(row[2]);
+                  const lng = parseFloat(row[3]);
+                  if (isNaN(lat) || isNaN(lng)) continue;
+
+                  loadedLandmarks.push({
+                    id: parseInt(row[0].trim(), 10),
+                    name: row[1] ? row[1].trim() : `大花 ${row[0]}`,
+                    lat: lat,
+                    lng: lng,
+                    expire: row[4] && row[4].trim() !== "null" && row[4].trim() !== "" ? row[4].trim() : null,
+                    region: row[5] ? row[5].trim() : "keelung"
+                  });
+                }
+                if (loadedLandmarks.length > 0) {
+                  setLandmarks(loadedLandmarks);
+                  localStorage.setItem(`${LOCAL_STORAGE_KEY_PREFIX}_master_list`, JSON.stringify(loadedLandmarks));
+                  centerMapOnLandmarks(loadedLandmarks);
+                  showToast("📥 免登入唯讀載入完成！");
+                  setLastSyncedTime(new Date());
+                  playSynthChime();
+                  return;
                 }
               }
-
-              const loadedLandmarks: Landmark[] = [];
-              for (let i = startIndex; i < rows.length; i++) {
-                const row = rows[i];
-                if (!row || row.length < 4 || !row[0]) continue;
-                const lat = parseFloat(row[2]);
-                const lng = parseFloat(row[3]);
-                if (isNaN(lat) || isNaN(lng)) continue;
-
-                loadedLandmarks.push({
-                  id: parseInt(row[0].trim(), 10),
-                  name: row[1] ? row[1].trim() : `大花 ${row[0]}`,
-                  lat: lat,
-                  lng: lng,
-                  expire: row[4] && row[4].trim() !== "null" && row[4].trim() !== "" ? row[4].trim() : null,
-                  region: row[5] ? row[5].trim() : "keelung"
-                });
-              }
-              if (loadedLandmarks.length > 0) {
-                setLandmarks(loadedLandmarks);
-                localStorage.setItem(`${LOCAL_STORAGE_KEY_PREFIX}_master_list`, JSON.stringify(loadedLandmarks));
-                centerMapOnLandmarks(loadedLandmarks);
-                showToast("📥 免登入唯讀載入完成！");
-                playSynthChime();
-                return;
-              }
             }
+          } catch (csvErr) {
+            console.error("Public CSV read failed, falling back to REST API", csvErr);
           }
-        } catch (csvErr) {
-          console.error("Public CSV read failed, falling back to REST API", csvErr);
         }
       }
-    }
 
-    // Google Sheets REST API
-    const fetchHeaders: Record<string, string> = {};
-    if (accessToken) {
-      fetchHeaders['Authorization'] = `Bearer ${accessToken}`;
-    }
+      // Google Sheets REST API
+      const fetchHeaders: Record<string, string> = {};
+      if (accessToken) {
+        fetchHeaders['Authorization'] = `Bearer ${accessToken}`;
+      }
 
-    try {
       const metaResponse = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?fields=sheets(properties/title)`, {
         headers: fetchHeaders
       });
@@ -855,6 +860,7 @@ export default function App() {
           if (accessToken) {
             showToast("🌱 雲端為空！正在自動初始化預設大花點位...");
             await initializeSpreadsheetDefault(accessToken, sheetId, targetSheetName);
+            setLastSyncedTime(new Date());
           } else {
             showToast("⚠️ 雲端試算表無資料且無寫入權限！");
           }
@@ -891,6 +897,7 @@ export default function App() {
         localStorage.setItem(`${LOCAL_STORAGE_KEY_PREFIX}_master_list`, JSON.stringify(loadedLandmarks));
         centerMapOnLandmarks(loadedLandmarks);
         showToast("📥 雲端資料同步完成！");
+        setLastSyncedTime(new Date());
         playSynthChime();
       } else {
         showToast("⚠️ 雲端讀取失敗。請確認：1.已設為「任何人皆可檢視」 2.試算表 ID 正確");
@@ -899,6 +906,8 @@ export default function App() {
     } catch (e) {
       showToast("⚠️ 連線至 Google API 失敗，請確認網路與權限並重試");
       playErrorBuzz();
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -1626,71 +1635,187 @@ export default function App() {
 
     const speedMps = (plantingSpeed * 1000) / 3600;
 
+    type SimulationStep = {
+      type: "start" | "move";
+      landmark: typeof targets[0];
+      distance?: number;
+      travelTime?: number;
+      arrivalTimeMs?: number;
+      waitTimeMs?: number;
+      plantingTimeMs?: number;
+      departureTimeMs?: number;
+    };
+
+    type SimulationResult = {
+      isValid: boolean;
+      totalDistance: number;
+      totalTravelTimeSec: number;
+      totalWaitTimeSec: number;
+      totalPlantingTimeSec: number;
+      totalDurationSec: number;
+      steps: SimulationStep[];
+      startTimeMs: number;
+    };
+
+    const createFailedSimulation = (): SimulationResult => ({
+      isValid: false,
+      totalDistance: 0,
+      totalTravelTimeSec: 0,
+      totalWaitTimeSec: 0,
+      totalPlantingTimeSec: 0,
+      totalDurationSec: 0,
+      steps: [],
+      startTimeMs: 0
+    });
+
+    const simulateRoute = (testPath: typeof targets, S: number): SimulationResult => {
+      let currentTimeMs = S;
+      let totalDistance = 0;
+      let totalTravelTimeMs = 0;
+      let totalWaitTimeMs = 0;
+      let totalPlantingTimeMs = 0;
+      
+      const steps: SimulationStep[] = [];
+
+      // Step 0: start at first flower
+      const f0 = testPath[0];
+      const E0 = f0.expire ? new Date(f0.expire).getTime() : 0;
+      let arrival0 = S;
+      let wait0 = 0;
+      let plant0 = 6 * 60 * 1000; // 6 minutes
+      let depart0 = 0;
+
+      if (E0 > now) {
+        // currently blooming
+        if (arrival0 > E0 - 60 * 1000) {
+          return createFailedSimulation(); // arrived too late, must be at least 1 min before leaf
+        }
+        wait0 = E0 - arrival0;
+        depart0 = E0 + plant0;
+      } else {
+        // already a leaf
+        wait0 = 0;
+        depart0 = arrival0 + plant0;
+        const leafEnd = E0 ? E0 + 30 * 60 * 1000 : Infinity;
+        if (depart0 > leafEnd) {
+          return createFailedSimulation(); // leaf expired before we finished planting
+        }
+      }
+
+      steps.push({
+        type: "start",
+        landmark: f0,
+        arrivalTimeMs: arrival0,
+        waitTimeMs: wait0,
+        plantingTimeMs: plant0,
+        departureTimeMs: depart0
+      });
+
+      totalWaitTimeMs += wait0;
+      totalPlantingTimeMs += plant0;
+      currentTimeMs = depart0;
+
+      for (let i = 1; i < testPath.length; i++) {
+        const prev = testPath[i - 1];
+        const curr = testPath[i];
+        const dist = getDistance(prev.lat, prev.lng, curr.lat, curr.lng);
+        totalDistance += dist;
+        const tTimeMs = (dist / speedMps) * 1000;
+        totalTravelTimeMs += tTimeMs;
+
+        const arrival = currentTimeMs + tTimeMs;
+        const Ei = curr.expire ? new Date(curr.expire).getTime() : 0;
+        let wait = 0;
+        let plant = 6 * 60 * 1000;
+        let depart = 0;
+
+        if (Ei > now) {
+          // currently blooming
+          if (arrival > Ei - 60 * 1000) {
+            return createFailedSimulation(); // must arrive at least 1 min before leaf transition
+          }
+          wait = Ei - arrival;
+          depart = Ei + plant;
+        } else {
+          // already a leaf
+          wait = 0;
+          depart = arrival + plant;
+          const leafEnd = Ei ? Ei + 30 * 60 * 1000 : Infinity;
+          if (depart > leafEnd) {
+            return createFailedSimulation(); // leaf expired before we finished planting
+          }
+        }
+
+        steps.push({
+          type: "move",
+          landmark: curr,
+          distance: dist,
+          travelTime: tTimeMs / 1000,
+          arrivalTimeMs: arrival,
+          waitTimeMs: wait,
+          plantingTimeMs: plant,
+          departureTimeMs: depart
+        });
+
+        totalWaitTimeMs += wait;
+        totalPlantingTimeMs += plant;
+        currentTimeMs = depart;
+      }
+
+      const totalDurationSec = (currentTimeMs - S) / 1000;
+
+      return {
+        isValid: true,
+        totalDistance,
+        totalTravelTimeSec: totalTravelTimeMs / 1000,
+        totalWaitTimeSec: totalWaitTimeMs / 1000,
+        totalPlantingTimeSec: totalPlantingTimeMs / 1000,
+        totalDurationSec,
+        steps,
+        startTimeMs: S
+      };
+    };
+
+    const getOptimalRouteSimulation = (testPath: typeof targets): SimulationResult => {
+      const firstFlower = testPath[0];
+      const E0 = firstFlower.expire ? new Date(firstFlower.expire).getTime() : 0;
+      let S = now;
+      if (E0 > now) {
+        S = E0 - 60 * 1000;
+        if (S < now) {
+          return createFailedSimulation();
+        }
+      } else {
+        S = now;
+      }
+      return simulateRoute(testPath, S);
+    };
+
     const testRouteCompatibility = (
       testPath: typeof targets,
       activeRole: "planting" | "freeloader",
       speedMps: number,
       maxDurationSec: number
     ) => {
-      let totalDistance = 0;
-      for (let i = 1; i < testPath.length; i++) {
-        totalDistance += getDistance(testPath[i - 1].lat, testPath[i - 1].lng, testPath[i].lat, testPath[i].lng);
-      }
-      const totalTravelTime = totalDistance / speedMps;
-      const totalPlantingTime = activeRole === "freeloader" ? 0 : testPath.length * 6 * 60;
-
-      // fast path check
-      if (totalTravelTime + totalPlantingTime > maxDurationSec) {
-        return { isValid: false };
-      }
-
       if (activeRole === "planting") {
-        const firstFlower = testPath[0];
-        const firstExpire = firstFlower.expire ? new Date(firstFlower.expire).getTime() : 0;
-        let S = now;
-        if (firstExpire > now) {
-          const maxS = firstExpire - 60 * 1000;
-          if (now > maxS) {
-            return { isValid: false }; // Cannot arrive 1 minute before leaf transition
-          }
-          S = maxS;
-        } else {
-          S = now;
-        }
-
-        const firstWindow = getLeafWindow(firstFlower, now);
-        if (S > firstWindow.end) {
-          return { isValid: false };
-        }
-        
-        const firstStart = Math.max(S, firstWindow.start);
-        let d_prev = firstStart + 6 * 60 * 1000;
-
-        for (let i = 1; i < testPath.length; i++) {
-          const window = getLeafWindow(testPath[i], now);
-          const dist = getDistance(testPath[i - 1].lat, testPath[i - 1].lng, testPath[i].lat, testPath[i].lng);
-          const travelTimeMs = (dist / speedMps) * 1000;
-          const a_curr = d_prev + travelTimeMs;
-
-          // Ensure arrival is at least 1 minute before the flower turns into a leaf (if currently blooming)
-          const expireTime = testPath[i].expire ? new Date(testPath[i].expire!).getTime() : 0;
-          if (expireTime > now && a_curr > (expireTime - 60 * 1000)) {
-            return { isValid: false };
-          }
-
-          if (a_curr > window.end) {
-            return { isValid: false };
-          }
-          const s_curr = Math.max(a_curr, window.start);
-          d_prev = s_curr + 6 * 60 * 1000;
-        }
-
-        const totalDuration = (d_prev - S) / 1000;
-        if (totalDuration > maxDurationSec) {
+        const sim = getOptimalRouteSimulation(testPath);
+        if (!sim.isValid) return { isValid: false };
+        if (sim.totalDurationSec > maxDurationSec) {
           return { isValid: false };
         }
         return { isValid: true };
       } else {
+        let totalDistance = 0;
+        for (let i = 1; i < testPath.length; i++) {
+          totalDistance += getDistance(testPath[i - 1].lat, testPath[i - 1].lng, testPath[i].lat, testPath[i].lng);
+        }
+        const totalTravelTime = totalDistance / speedMps;
+        const totalPlantingTime = 0;
+
+        if (totalTravelTime + totalPlantingTime > maxDurationSec) {
+          return { isValid: false };
+        }
+
         let currentSMin = -Infinity;
         let currentSMax = Infinity;
         let accumulatedTravelTime = 0;
@@ -1727,119 +1852,81 @@ export default function App() {
 
     // Helper to calculate route details for a given ordered path
     const calculateRouteDetails = (path: typeof targets) => {
-      let totalDistance = 0;
-      const steps: {
-        type: "start" | "move";
-        landmark: typeof targets[0];
-        distance?: number;
-        travelTime?: number;
-        arrivalTimeMs?: number;
-      }[] = [];
-
-      steps.push({
-        type: "start",
-        landmark: path[0]
-      });
-
-      for (let i = 1; i < path.length; i++) {
-        const d = getDistance(path[i - 1].lat, path[i - 1].lng, path[i].lat, path[i].lng);
-        totalDistance += d;
-        const tTime = d / speedMps;
-        steps.push({
-          type: "move",
-          landmark: path[i],
-          distance: d,
-          travelTime: tTime
-        });
-      }
-
-      const totalTravelTime = totalDistance / speedMps;
-      const totalPlantingTime = activeRole === "freeloader" ? 0 : path.length * 6 * 60; // 0 mins for freeloader, 6 mins per flower in seconds for planting
-      
-      let totalWaitTime = 0;
-      let recommendedStartTime = "無符合時間的路線";
-      let startTimeMs = Infinity;
-      let finalTotalDuration = totalTravelTime + totalPlantingTime;
-
-      const maxDurationSec = activeRole === "freeloader" ? 30 * 60 : 60 * 60;
-
       if (activeRole === "planting") {
-        const firstFlower = path[0];
-        const firstExpire = firstFlower.expire ? new Date(firstFlower.expire).getTime() : 0;
-        let S = now;
-        if (firstExpire > now) {
-          const maxS = firstExpire - 60 * 1000;
-          if (now <= maxS) {
-            S = maxS;
-          }
-        }
-        
-        const firstWindow = getLeafWindow(firstFlower, now);
-        let isValid = S <= firstWindow.end;
-        if (firstExpire > now && now > firstExpire - 60 * 1000) {
-          isValid = false;
-        }
-        
-        const firstStart = Math.max(S, firstWindow.start);
-        let d_prev = firstStart + 6 * 60 * 1000;
-        let tempWaitMs = 0;
-
-        if (isValid) {
-          for (let i = 1; i < path.length; i++) {
-            const window = getLeafWindow(path[i], now);
-            const dist = getDistance(path[i - 1].lat, path[i - 1].lng, path[i].lat, path[i].lng);
-            const travelTimeMs = (dist / speedMps) * 1000;
-            const a_curr = d_prev + travelTimeMs;
-
-            // Ensure arrival is at least 1 minute before the flower turns into a leaf (if currently blooming)
-            const expireTime = path[i].expire ? new Date(path[i].expire!).getTime() : 0;
-            if (expireTime > now && a_curr > (expireTime - 60 * 1000)) {
-              isValid = false;
-              break;
-            }
-
-            if (a_curr > window.end) {
-              isValid = false;
-              break;
-            }
-            const waitTimeMs = Math.max(0, window.start - a_curr);
-            tempWaitMs += waitTimeMs;
-            const s_curr = Math.max(a_curr, window.start);
-            d_prev = s_curr + 6 * 60 * 1000;
-          }
+        const sim = getOptimalRouteSimulation(path);
+        if (!sim.isValid) {
+          return {
+            path,
+            totalDistance: 0,
+            totalTravelTime: 0,
+            totalPlantingTime: 0,
+            totalDuration: 0,
+            steps: path.map(landmark => ({ type: "start", landmark })),
+            recommendedStartTime: "無符合時間的路線",
+            startTimeMs: Infinity
+          };
         }
 
-        if (isValid) {
-          const firstWaitMs = Math.max(0, firstWindow.start - S);
-          totalWaitTime = (firstWaitMs + tempWaitMs) / 1000;
-          finalTotalDuration = (d_prev - S) / 1000;
-
-          if (finalTotalDuration > maxDurationSec) {
-            recommendedStartTime = "總時間超過 60 分鐘上限 (請切換交通工具)";
-          } else {
-            startTimeMs = S;
-            if (startTimeMs <= now) {
-              recommendedStartTime = "可立即出發";
-            } else {
-              const dateObj = new Date(startTimeMs);
-              const dateStr = `${(dateObj.getMonth() + 1).toString().padStart(2, '0')}/${dateObj.getDate().toString().padStart(2, '0')}`;
-              recommendedStartTime = `${dateStr} ${dateObj.getHours().toString().padStart(2, '0')}:${dateObj.getMinutes().toString().padStart(2, '0')} 出發`;
-            }
-          }
-
-          steps[0].arrivalTimeMs = startTimeMs;
-          let d_prev_ms = firstStart + 6 * 60 * 1000;
-          for (let i = 1; i < steps.length; i++) {
-            const dist = getDistance(path[i - 1].lat, path[i - 1].lng, path[i].lat, path[i].lng);
-            const travelTimeMs = (dist / speedMps) * 1000;
-            steps[i].arrivalTimeMs = d_prev_ms + travelTimeMs;
-            const window = getLeafWindow(path[i], now);
-            const s_curr = Math.max(steps[i].arrivalTimeMs, window.start);
-            d_prev_ms = s_curr + 6 * 60 * 1000;
-          }
+        let recommendedStartTime = "";
+        if (sim.startTimeMs <= now) {
+          recommendedStartTime = "可立即出發";
+        } else {
+          const dateObj = new Date(sim.startTimeMs);
+          const dateStr = `${(dateObj.getMonth() + 1).toString().padStart(2, '0')}/${dateObj.getDate().toString().padStart(2, '0')}`;
+          recommendedStartTime = `${dateStr} ${dateObj.getHours().toString().padStart(2, '0')}:${dateObj.getMinutes().toString().padStart(2, '0')} 出發`;
         }
+
+        const maxDurationSec = 60 * 60;
+        if (sim.totalDurationSec > maxDurationSec) {
+          recommendedStartTime = "總時間超過 60 分鐘上限 (請切換交通工具)";
+        }
+
+        return {
+          path,
+          totalDistance: sim.totalDistance,
+          totalTravelTime: sim.totalTravelTimeSec,
+          totalPlantingTime: sim.totalPlantingTimeSec,
+          totalDuration: sim.totalDurationSec,
+          steps: sim.steps,
+          recommendedStartTime,
+          startTimeMs: sim.startTimeMs
+        };
       } else {
-        // freeloader
+        let totalDistance = 0;
+        const steps: {
+          type: "start" | "move";
+          landmark: typeof targets[0];
+          distance?: number;
+          travelTime?: number;
+          arrivalTimeMs?: number;
+        }[] = [];
+
+        steps.push({
+          type: "start",
+          landmark: path[0]
+        });
+
+        for (let i = 1; i < path.length; i++) {
+          const d = getDistance(path[i - 1].lat, path[i - 1].lng, path[i].lat, path[i].lng);
+          totalDistance += d;
+          const tTime = d / speedMps;
+          steps.push({
+            type: "move",
+            landmark: path[i],
+            distance: d,
+            travelTime: tTime
+          });
+        }
+
+        const totalTravelTime = totalDistance / speedMps;
+        const totalPlantingTime = 0;
+        
+        let recommendedStartTime = "無符合時間的路線";
+        let startTimeMs = Infinity;
+        let finalTotalDuration = totalTravelTime + totalPlantingTime;
+
+        const maxDurationSec = 30 * 60;
+
         let currentSMin = -Infinity;
         let currentSMax = Infinity;
         let accumulatedTravelTime = 0;
@@ -1878,7 +1965,6 @@ export default function App() {
             recommendedStartTime = `${dateStr} ${dateObj.getHours().toString().padStart(2, '0')}:${dateObj.getMinutes().toString().padStart(2, '0')} 出發`;
           }
 
-          // Compute arrivalTimeMs for each step based on the decided startTimeMs
           let accumulatedTime = 0;
           for (let j = 0; j < steps.length; j++) {
             if (j > 0) {
@@ -1890,18 +1976,18 @@ export default function App() {
         } else if (accumulatedTravelTime > maxDurationSec) {
           recommendedStartTime = "總時間超過 30 分鐘上限 (請切換交通工具)";
         }
-      }
 
-      return {
-        path,
-        totalDistance,
-        totalTravelTime,
-        totalPlantingTime,
-        totalDuration: finalTotalDuration,
-        steps,
-        recommendedStartTime,
-        startTimeMs
-      };
+        return {
+          path,
+          totalDistance,
+          totalTravelTime,
+          totalPlantingTime,
+          totalDuration: finalTotalDuration,
+          steps,
+          recommendedStartTime,
+          startTimeMs
+        };
+      }
     };
 
     if (activeRole === "freeloader") {
@@ -3132,7 +3218,7 @@ export default function App() {
                   <div className="flex items-center gap-3">
                     <span className="text-2xl">🚶‍♂️🚴‍♀️</span>
                     <div className="flex-1">
-                      <h3 className="font-bold text-xs text-pink-400">走路/騎車普通種花</h3>
+                      <h3 className="font-bold text-xs text-pink-400">走路/騎車一般種花</h3>
                       <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
                         以種一株花 <strong className="text-white">6 分鐘</strong> 加上移動時間精算，規劃連續種花最優路線，出門一趟種最多花！
                       </p>
@@ -4207,6 +4293,29 @@ export default function App() {
               </button>
             </div>
 
+            {/* Sync status & action bar inside Modal */}
+            <div className="mt-2.5 p-2 rounded-xl bg-slate-950/70 border border-slate-800/80 flex items-center justify-between gap-2 text-[10px]">
+              <div className="flex items-center gap-1.5 text-slate-400">
+                <span className={`w-1.5 h-1.5 rounded-full ${isSyncing ? "bg-amber-400 animate-pulse" : "bg-emerald-500"}`} />
+                <span className="font-medium text-slate-300">
+                  {isSyncing 
+                    ? "正在同步雲端最新開花資料..." 
+                    : lastSyncedTime 
+                      ? `資料已同步於 ${lastSyncedTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` 
+                      : "尚未與雲端試算表同步"
+                  }
+                </span>
+              </div>
+              <button
+                disabled={isSyncing}
+                onClick={() => pullDataFromSheets(googleAccessToken, configSheetId)}
+                className="px-2.5 py-1 rounded bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 border border-indigo-500/20 font-bold transition flex items-center gap-1 active:scale-95 disabled:opacity-50"
+              >
+                <i className={`fa-solid fa-arrows-rotate ${isSyncing ? "animate-spin" : ""}`}></i>
+                <span>同步</span>
+              </button>
+            </div>
+
             {/* Modal Navigation Tabs */}
             <div className="flex border-b border-slate-800/80 mb-4 mt-3">
               <button
@@ -4217,7 +4326,7 @@ export default function App() {
                     : "border-transparent text-slate-400 hover:text-slate-300"
                 }`}
               >
-                🚶‍♂️/🚴‍♀️ 普通種花
+                🚶‍♂️/🚴‍♀️ 一般種花
               </button>
               <button
                 onClick={() => setNavModalTab("force_bloom")}
