@@ -1272,14 +1272,18 @@ export default function App() {
       
       // Dynamic Height calculation
       const headerHeight = 220;
-      const stepSpacing = 140;
+      const stepSpacing = 145;
       const extraBottomPadding = 80; // Add ~80px gap after the last station before the footer
-      const footerHeight = 240 + extraBottomPadding;
+      const footerHeight = 250 + extraBottomPadding;
       const canvasWidth = 600;
       const canvasHeight = headerHeight + (numSteps - 1) * stepSpacing + footerHeight;
 
-      canvas.width = canvasWidth;
-      canvas.height = canvasHeight;
+      const scaleFactor = 2; // Generate 2x high resolution (1200px width)
+      canvas.width = canvasWidth * scaleFactor;
+      canvas.height = canvasHeight * scaleFactor;
+      
+      // Enable high-quality scaling
+      ctx.scale(scaleFactor, scaleFactor);
 
       // 1. Background Gradient (deep cosmic space style)
       const bgGrad = ctx.createLinearGradient(0, 0, 0, canvasHeight);
@@ -1328,36 +1332,36 @@ export default function App() {
       drawRoundedRect(30, 30, canvasWidth - 60, 160, 16);
 
       // Title
-      ctx.font = "bold 22px 'PingFang TC', 'Microsoft JhengHei', sans-serif";
+      ctx.font = "bold 25px 'PingFang TC', 'Microsoft JhengHei', sans-serif";
       ctx.fillStyle = "#ffffff";
       ctx.textAlign = "center";
-      ctx.fillText(`大花路線：輕鬆收飄帶`, canvasWidth / 2, 65);
+      ctx.fillText(`大花路線：輕鬆收飄帶`, canvasWidth / 2, 68);
 
       // Metrics columns inside the header box
-      const metricsY = 105;
+      const metricsY = 108;
       const colWidth = (canvasWidth - 80) / 3;
 
       // Col 1: Total Flowers
-      ctx.font = "12px 'PingFang TC', 'Microsoft JhengHei', sans-serif";
+      ctx.font = "13px 'PingFang TC', 'Microsoft JhengHei', sans-serif";
       ctx.fillStyle = "#94a3b8"; // slate-400
       ctx.fillText("總計大花", 40 + colWidth / 2, metricsY);
-      ctx.font = "bold 15px 'PingFang TC', 'Microsoft JhengHei', sans-serif";
+      ctx.font = "bold 17px 'PingFang TC', 'Microsoft JhengHei', sans-serif";
       ctx.fillStyle = "#f59e0b"; // amber-400
       ctx.fillText(`👑 ${route.path.length} 朵大花`, 40 + colWidth / 2, metricsY + 28);
 
       // Col 2: Total Duration
-      ctx.font = "12px 'PingFang TC', 'Microsoft JhengHei', sans-serif";
+      ctx.font = "13px 'PingFang TC', 'Microsoft JhengHei', sans-serif";
       ctx.fillStyle = "#94a3b8";
       ctx.fillText("預計時間", 40 + colWidth * 1.5, metricsY);
-      ctx.font = "bold 15px 'PingFang TC', 'Microsoft JhengHei', sans-serif";
+      ctx.font = "bold 17px 'PingFang TC', 'Microsoft JhengHei', sans-serif";
       ctx.fillStyle = "#c084fc"; // purple-400
       ctx.fillText(`⏱️ ${Math.floor(route.totalDuration / 60)}分${Math.round(route.totalDuration % 60)}秒`, 40 + colWidth * 1.5, metricsY + 28);
 
       // Col 3: Start Time
-      ctx.font = "12px 'PingFang TC', 'Microsoft JhengHei', sans-serif";
+      ctx.font = "13px 'PingFang TC', 'Microsoft JhengHei', sans-serif";
       ctx.fillStyle = "#94a3b8";
       ctx.fillText("建議出發", 40 + colWidth * 2.5, metricsY);
-      ctx.font = "bold 15px 'PingFang TC', 'Microsoft JhengHei', sans-serif";
+      ctx.font = "bold 17px 'PingFang TC', 'Microsoft JhengHei', sans-serif";
       ctx.fillStyle = "#10b981"; // emerald-500
       ctx.fillText(`📅 ${route.recommendedStartTime}`, 40 + colWidth * 2.5, metricsY + 28);
 
@@ -1373,7 +1377,7 @@ export default function App() {
       lineGrad.addColorStop(1, "#f59e0b"); // amber
       
       ctx.strokeStyle = lineGrad;
-      ctx.lineWidth = 4;
+      ctx.lineWidth = 5;
       ctx.lineCap = "round";
       ctx.beginPath();
       ctx.moveTo(centerX, firstStepY);
@@ -1381,12 +1385,12 @@ export default function App() {
       ctx.stroke();
 
       // Top flag icon decoration at starting node
-      ctx.font = "20px sans-serif";
+      ctx.font = "22px sans-serif";
       ctx.textAlign = "center";
       ctx.fillText("🚩", centerX, firstStepY - 26);
 
       // Crown icon decoration at ending node
-      ctx.fillText("👑", centerX, lastStepY + 36);
+      ctx.fillText("👑", centerX, lastStepY + 38);
 
       // Loop over and draw steps
       steps.forEach((step: any, idx: number) => {
@@ -1406,15 +1410,15 @@ export default function App() {
           // Draw small walking indicator beside the central line
           const midY = (prevStepY + stepY) / 2;
           ctx.fillStyle = "#94a3b8";
-          ctx.font = "11px 'PingFang TC', sans-serif";
+          ctx.font = "12px 'PingFang TC', sans-serif";
           ctx.textAlign = isEven ? "left" : "right";
-          const textX = isEven ? centerX + 18 : centerX - 18;
+          const textX = isEven ? centerX + 20 : centerX - 20;
           ctx.fillText(`🚶 下站 ${distText}`, textX, midY + 4);
         }
 
         // Draw Node Circle
         ctx.beginPath();
-        ctx.arc(centerX, stepY, 14, 0, Math.PI * 2);
+        ctx.arc(centerX, stepY, 16, 0, Math.PI * 2);
         if (isStart) {
           ctx.fillStyle = "#10b981"; // Emerald
         } else if (isEnd) {
@@ -1424,20 +1428,20 @@ export default function App() {
         }
         ctx.fill();
         ctx.strokeStyle = "#ffffff";
-        ctx.lineWidth = 1.5;
+        ctx.lineWidth = 2;
         ctx.stroke();
 
         // Node index text (inside circle)
         ctx.fillStyle = "#ffffff";
-        ctx.font = "bold 11px 'PingFang TC', sans-serif";
+        ctx.font = "bold 12px 'PingFang TC', sans-serif";
         ctx.textAlign = "center";
         const textLabel = isStart ? "起" : isEnd ? "終" : `${idx + 1}`;
         ctx.fillText(textLabel, centerX, stepY + 4);
 
         // Draw Landmark Info Card (Alternating left & right)
-        const cardW = 225;
-        const cardH = 88;
-        const cardX = isEven ? centerX - cardW - 25 : centerX + 25;
+        const cardW = 230;
+        const cardH = 94;
+        const cardX = isEven ? centerX - cardW - 28 : centerX + 28;
         const cardY = stepY - cardH / 2;
 
         ctx.fillStyle = "rgba(15, 23, 42, 0.85)";
@@ -1450,7 +1454,7 @@ export default function App() {
         const name = step.landmark.name;
         const titleText = `${isStart ? "📍 " : ""}${isEnd ? "🏁 " : ""}#${hNum} ${name}`;
 
-        ctx.font = "bold 11px 'PingFang TC', 'Microsoft JhengHei', sans-serif";
+        ctx.font = "bold 13px 'PingFang TC', 'Microsoft JhengHei', sans-serif";
         ctx.fillStyle = "#f8fafc"; // slate-50
         ctx.textAlign = "left";
 
@@ -1478,7 +1482,7 @@ export default function App() {
           });
         };
 
-        drawWrappedText(titleText, cardX + 12, cardY + 22, cardW - 24, 14);
+        drawWrappedText(titleText, cardX + 12, cardY + 24, cardW - 24, 16);
 
         // Draw timing windows
         const landmark = step.landmark;
@@ -1492,13 +1496,13 @@ export default function App() {
           return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
         };
 
-        ctx.font = "10px sans-serif";
+        ctx.font = "11px sans-serif";
         ctx.fillStyle = "#22d3ee"; // cyan-400
-        ctx.fillText(`🎗️ 飄帶：${formatTimeFromMs(ribbonStart)} ~ ${formatTimeFromMs(ribbonEnd)}`, cardX + 12, cardY + 54);
+        ctx.fillText(`🎗️ 飄帶：${formatTimeFromMs(ribbonStart)} ~ ${formatTimeFromMs(ribbonEnd)}`, cardX + 12, cardY + 58);
 
         ctx.fillStyle = "#f472b6"; // pink-400
         const arrTimeText = step.arrivalTimeMs ? formatTimeFromMs(step.arrivalTimeMs) : "立即";
-        ctx.fillText(`⏱️ 預估抵達：${arrTimeText}`, cardX + 12, cardY + 70);
+        ctx.fillText(`⏱️ 預估抵達：${arrTimeText}`, cardX + 12, cardY + 76);
       });
 
       // 4. Footer Card Area with Watermarks, Website, QR code
@@ -1514,27 +1518,27 @@ export default function App() {
 
       // Left Footer
       ctx.fillStyle = "#ffffff";
-      ctx.font = "bold 15px 'PingFang TC', sans-serif";
+      ctx.font = "bold 17px 'PingFang TC', sans-serif";
       ctx.textAlign = "left";
-      ctx.fillText("路線完成！收穫豐富 💐", 30, footerY + 15);
+      ctx.fillText("路線完成！收穫豐富 💐", 30, footerY + 18);
 
-      ctx.font = "11px 'PingFang TC', sans-serif";
+      ctx.font = "12px 'PingFang TC', sans-serif";
       ctx.fillStyle = "#94a3b8"; // slate-400
-      ctx.fillText("Project 花嶼雞籠 Beta 版", 30, footerY + 40);
+      ctx.fillText("Project 花嶼雞籠 Beta 版", 30, footerY + 44);
 
-      ctx.font = "11px sans-serif";
+      ctx.font = "12px sans-serif";
       ctx.fillStyle = "#f59e0b"; // amber-400
-      ctx.fillText("網址：https://alonehung.github.io/FloraKeeLung/", 30, footerY + 60);
+      ctx.fillText("網址：https://alonehung.github.io/FloraKeeLung/", 30, footerY + 66);
 
       ctx.fillStyle = "rgba(148, 163, 184, 0.35)";
-      ctx.font = "9px sans-serif";
-      ctx.fillText("官方推薦：Keelung Flower Planner Auto-Generated Image Map", 30, footerY + 80);
+      ctx.font = "10px sans-serif";
+      ctx.fillText("官方推薦：Keelung Flower Planner Auto-Generated Image Map", 30, footerY + 88);
 
       // Right Footer: Generate and Draw QR code
       try {
         const qrDataUrl = await QRCode.toDataURL("https://alonehung.github.io/FloraKeeLung/", {
           margin: 1,
-          width: 90,
+          width: 100,
           color: {
             dark: "#0b0f19",
             light: "#ffffff"
@@ -1547,9 +1551,9 @@ export default function App() {
           qrImage.onload = resolve;
         });
 
-        const qrX = canvasWidth - 120;
+        const qrX = canvasWidth - 130;
         const qrY = footerY - 5;
-        const qrSize = 90;
+        const qrSize = 100;
 
         // Draw white frame background for QR code
         ctx.fillStyle = "#ffffff";
@@ -1557,10 +1561,10 @@ export default function App() {
 
         ctx.drawImage(qrImage, qrX, qrY, qrSize, qrSize);
 
-        ctx.font = "9px 'PingFang TC', sans-serif";
+        ctx.font = "10px 'PingFang TC', sans-serif";
         ctx.fillStyle = "#ffffff";
         ctx.textAlign = "center";
-        ctx.fillText("掃描規劃路線", qrX + qrSize / 2, qrY + qrSize + 16);
+        ctx.fillText("掃描規劃路線", qrX + qrSize / 2, qrY + qrSize + 18);
       } catch (qrErr) {
         console.error("Failed to render QR Code inside Canvas footer", qrErr);
       }
