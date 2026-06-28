@@ -4639,7 +4639,10 @@ export default function App() {
               <div className="space-y-4 py-1">
                 {/* Generate Text Schedule Button */}
                 <button
-                  onClick={() => setShowFreeloaderSchedule(true)}
+                  onClick={() => {
+                    setShowFreeloaderSchedule(true);
+                    setShowNavModal(false);
+                  }}
                   className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-amber-500/10 via-orange-500/10 to-amber-500/10 hover:from-amber-500/20 hover:to-orange-500/20 text-amber-400 border border-amber-500/30 font-black text-xs transition duration-150 active:scale-95 flex items-center justify-center gap-2 shadow"
                 >
                   <i className="fa-solid fa-calendar-days text-[13px]"></i>
