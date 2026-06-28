@@ -4436,19 +4436,20 @@ export default function App() {
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    const coordinateString = `${spot.lat.toFixed(7)}, ${spot.lng.toFixed(7)}`;
+                                    const fullFlowers = processedPoints.filter(p => spot.coveredIds.includes(p.id));
+                                    const coordinateString = fullFlowers.map(f => `${f.lat.toFixed(7)}, ${f.lng.toFixed(7)}`).join("\n");
                                     const tempTextarea = document.createElement('textarea');
                                     tempTextarea.value = coordinateString;
                                     document.body.appendChild(tempTextarea);
                                     tempTextarea.select();
                                     document.execCommand('copy');
                                     document.body.removeChild(tempTextarea);
-                                    showToast(`📋 駐點座標已複製：${coordinateString}`);
+                                    showToast(`📋 已複製該駐點全部 ${fullFlowers.length} 朵花卉之座標！`);
                                   }}
                                   className="bg-slate-950 hover:bg-slate-900 text-slate-300 border border-slate-800 py-2 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 transition"
                                 >
                                   <i className="fa-solid fa-copy"></i>
-                                  <span>複製座標</span>
+                                  <span>複製全部花朵座標</span>
                                 </button>
 
                                 <button
@@ -4462,6 +4463,57 @@ export default function App() {
                                 >
                                   <i className="fa-solid fa-location-arrow"></i>
                                   <span>開啟 Google Maps 導航</span>
+                                </button>
+                              </div>
+
+                              {/* GPX Generation button for force bloom harvesting */}
+                              <div className="mt-2">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const fullFlowers = processedPoints.filter(p => spot.coveredIds.includes(p.id));
+                                    const gpxContent = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Keelung Flower Planner" xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata>
+    <name>強開收花路線 ${index + 1} (${colorInfo.name})</name>
+    <desc>基隆大花導航與精算系統 - 強開定點收花規劃路線</desc>
+  </metadata>
+  <wpt lat="${spot.lat}" lon="${spot.lng}">
+    <name>★強開駐點★</name>
+  </wpt>
+  ${fullFlowers.map((p, fIdx) => `  <wpt lat="${p.lat}" lon="${p.lng}">
+    <name>${fIdx + 1}. ${p.name}</name>
+  </wpt>`).join("\n")}
+  <trk>
+    <name>強開收花路線 ${index + 1} (${colorInfo.name})</name>
+    <trkseg>
+      <trkpt lat="${spot.lat}" lon="${spot.lng}">
+        <name>★強開駐點★</name>
+      </trkpt>
+      ${fullFlowers.map(p => `      <trkpt lat="${p.lat}" lon="${p.lng}">
+        <name>${p.name}</name>
+      </trkpt>`).join("\n")}
+    </trkseg>
+  </trk>
+</gpx>`;
+
+                                    const blob = new Blob([gpxContent], { type: "application/gpx+xml;charset=utf-8;" });
+                                    const url = URL.createObjectURL(blob);
+                                    const link = document.createElement("a");
+                                    link.href = url;
+                                    const d = new Date();
+                                    const fileName = `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日收花專用.gpx`;
+                                    link.setAttribute("download", fileName);
+                                    document.body.appendChild(link);
+                                    link.click();
+                                    document.body.removeChild(link);
+                                    URL.revokeObjectURL(url);
+                                    showToast(`📥 已成功導出「${fileName}」的 GPX 檔案！`);
+                                  }}
+                                  className="w-full bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700/60 font-extrabold py-2 px-3 rounded-xl text-[11px] transition shadow-md flex items-center justify-center gap-1.5 active:scale-95"
+                                >
+                                  <i className="fa-solid fa-download text-pink-400"></i>
+                                  <span>生成並下載 {colorInfo.name} 路線 GPX 軌跡檔</span>
                                 </button>
                               </div>
                             </div>
