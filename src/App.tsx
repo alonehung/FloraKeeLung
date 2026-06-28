@@ -1022,7 +1022,7 @@ export default function App() {
   let recommendedPlantingTime = "無建議時間";
 
   if (userRole === "planting" || userRole === "freeloader") {
-    // Planting or Freeloader mode: find the earliest starting time S for sequentially planting/harvesting at least 5 flowers.
+    // Planting or Freeloader mode: find the earliest starting time S for sequentially planting/harvesting at least 4 flowers.
     // Include all region points, using the appropriate time windows.
     const allRegionPointsWithTime = regionPoints.map(l => {
       const window = userRole === "freeloader" ? getHarvestWindow(l, now) : getLeafWindow(l, now);
@@ -1033,11 +1033,11 @@ export default function App() {
       };
     }).sort((a, b) => a.windowStart - b.windowStart);
 
-    if (allRegionPointsWithTime.length < 5) {
-      recommendedPlantingTime = userRole === "freeloader" ? "本區花點不足 5 朵" : "本區花點不足 5 朵";
+    if (allRegionPointsWithTime.length < 4) {
+      recommendedPlantingTime = userRole === "freeloader" ? "本區花點不足 4 朵" : "本區花點不足 4 朵";
     } else {
-      const getBestStartTimeFor5 = (flowers: typeof allRegionPointsWithTime) => {
-        // Generate all 120 permutations of 5 elements
+      const getBestStartTimeFor4 = (flowers: typeof allRegionPointsWithTime) => {
+        // Generate all 24 permutations of 4 elements
         const perms: number[][] = [];
         const generatePerms = (current: number[], remaining: number[]) => {
           if (remaining.length === 0) {
@@ -1048,7 +1048,7 @@ export default function App() {
             generatePerms([...current, remaining[i]], remaining.filter((_, idx) => idx !== i));
           }
         };
-        generatePerms([], [0, 1, 2, 3, 4]);
+        generatePerms([], [0, 1, 2, 3]);
 
         let bestSStartForGroup = Infinity;
         const speedMps = (plantingSpeed * 1000) / 3600;
@@ -1079,7 +1079,7 @@ export default function App() {
             let totalWaitTimeMs = 0;
             let totalDistance = 0;
 
-            for (let j = 1; j < 5; j++) {
+            for (let j = 1; j < 4; j++) {
               const currFlower = flowers[perm[j]];
               const prevFlower = flowers[perm[j - 1]];
               const dist = getDistance(prevFlower.lat, prevFlower.lng, currFlower.lat, currFlower.lng);
@@ -1120,7 +1120,7 @@ export default function App() {
             let currentSMax = Infinity;
             let accumulatedTravelTime = 0;
 
-            for (let j = 0; j < 5; j++) {
+            for (let j = 0; j < 4; j++) {
               const currFlower = flowers[perm[j]];
               
               if (j > 0) {
@@ -1162,10 +1162,10 @@ export default function App() {
       let bestStartTime = Infinity;
       let bestGroup: typeof allRegionPointsWithTime = [];
 
-      // Loop over all contiguous groups of 5 in sorted order
-      for (let i = 0; i <= allRegionPointsWithTime.length - 5; i++) {
-        const group = allRegionPointsWithTime.slice(i, i + 5);
-        const minSStart = getBestStartTimeFor5(group);
+      // Loop over all contiguous groups of 4 in sorted order
+      for (let i = 0; i <= allRegionPointsWithTime.length - 4; i++) {
+        const group = allRegionPointsWithTime.slice(i, i + 4);
+        const minSStart = getBestStartTimeFor4(group);
         if (minSStart < bestStartTime) {
           bestStartTime = minSStart;
           bestGroup = group;
@@ -1177,19 +1177,19 @@ export default function App() {
 
       if (bestStartTime === Infinity) {
         recommendedPlantingTime = userRole === "freeloader" 
-          ? "無符合(或總時間超30分)之5花伸手黨路線" 
-          : "無符合(或總時間超60分)之5花點路線";
+          ? "無符合(或總時間超30分)之4花輕鬆收飄帶路線" 
+          : "無符合(或總時間超60分)之4花點路線";
       } else if (bestStartTime <= now) {
         recommendedPlantingTime = userRole === "freeloader"
-          ? "可立即出發 (滿足伸手黨條件)"
-          : "可立即出發 (滿足5花點)";
+          ? "可立即出發 (滿足輕鬆收飄帶條件)"
+          : "可立即出發 (滿足4花點)";
       } else {
         const dateObj = new Date(bestStartTime);
         const dateStr = `${(dateObj.getMonth() + 1).toString().padStart(2, '0')}/${dateObj.getDate().toString().padStart(2, '0')}`;
         const timeStr = `${dateObj.getHours().toString().padStart(2, '0')}:${dateObj.getMinutes().toString().padStart(2, '0')}`;
         recommendedPlantingTime = userRole === "freeloader"
-          ? `${dateStr} ${timeStr} (5花伸手黨最佳時間)`
-          : `${dateStr} ${timeStr} (5花點同種最佳時間)`;
+          ? `${dateStr} ${timeStr} (4花輕鬆收飄帶最佳時間)`
+          : `${dateStr} ${timeStr} (4花點同種最佳時間)`;
       }
     }
   } else if (userRole === "force_bloom") {
@@ -1628,9 +1628,9 @@ export default function App() {
         routes.push(calculateRouteDetails(path));
       }
     } else {
-      // Planting mode - partition into groups of size 5
+      // Planting mode - partition into groups of size 4
       const maxDurationSec = 60 * 60;
-      while (unassigned.length >= 5) {
+      while (unassigned.length >= 4) {
         // Find starting point (prioritize earliest windowStart)
         let startIdx = 0;
         let earliestStart = Infinity;
@@ -1647,8 +1647,8 @@ export default function App() {
         path.push(curr);
         unassigned.splice(startIdx, 1);
 
-        // Greedily find the nearest 4 unassigned neighbors
-        for (let k = 0; k < 4; k++) {
+        // Greedily find the nearest 3 unassigned neighbors
+        for (let k = 0; k < 3; k++) {
           if (unassigned.length === 0) break;
           
           let bestIdx = -1;
@@ -1693,7 +1693,7 @@ export default function App() {
         routes.push(calculateRouteDetails(path));
       }
 
-      // If there are left-over targets (fewer than 5) and we already have at least one route:
+      // If there are left-over targets (fewer than 4) and we already have at least one route:
       // Append each remaining target to its nearest route end/start point.
       if (unassigned.length > 0 && routes.length > 0) {
         while (unassigned.length > 0) {
@@ -1736,7 +1736,7 @@ export default function App() {
           unassigned.splice(0, 1);
         }
       } else if (unassigned.length > 0 && routes.length === 0) {
-        // If total targets < 5, just put them all into a single route of length < 5
+        // If total targets < 4, just put them all into a single route of length < 4
         routes.push(calculateRouteDetails(unassigned));
       }
     }
@@ -2251,7 +2251,7 @@ export default function App() {
             <strong style="color: ${colorInfo.hex}">🚗 路線 ${rIdx + 1} (${colorInfo.name})</strong><br/>
             建議：<strong>${route.recommendedStartTime}</strong><br/>
             花數：${route.path.length} 朵<br/>
-            時長：${Math.floor(route.totalDuration / 60)} 分 ${Math.round(route.totalDuration % 60)} 秒 (${userRole === "freeloader" ? "伸手黨收割" : "種花"})
+            時長：${Math.floor(route.totalDuration / 60)} 分 ${Math.round(route.totalDuration % 60)} 秒 (${userRole === "freeloader" ? "輕鬆收飄帶" : "種花"})
           </div>
         `);
 
@@ -2846,7 +2846,7 @@ export default function App() {
                   )}
                 </button>
 
-                {/* Option 3: Freeloader / 伸手黨 */}
+                {/* Option 3: Freeloader / 輕鬆種花收飄帶 */}
                 <button
                   type="button"
                   onClick={() => {
@@ -2862,9 +2862,9 @@ export default function App() {
                   <div className="flex items-center gap-3">
                     <span className="text-2xl">👑💎</span>
                     <div className="flex-1">
-                      <h3 className="font-bold text-xs text-amber-400">伸手黨直接收割</h3>
+                      <h3 className="font-bold text-xs text-amber-400">輕鬆種花收飄帶</h3>
                       <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
-                        不需辛勤種植！預估市區葉子最快 <strong className="text-white">15 分鐘內</strong> 會被他人種開，精算最省力之 5+ 朵大花伸手黨路線！
+                        不需辛勤種植！預估市區葉子最快 <strong className="text-white">15 分鐘內</strong> 會被他人種開，精算 30 分鐘內最省力、收割最多大花果實之最佳路線！
                       </p>
                     </div>
                   </div>
@@ -2941,7 +2941,7 @@ export default function App() {
                     className="text-[10px] font-black bg-pink-500/10 hover:bg-pink-500/20 border border-pink-500/30 text-pink-400 px-2 py-1.5 rounded-xl transition flex items-center gap-1"
                     title="切換方式"
                   >
-                    <span>{userRole === "planting" ? "🚶‍♂️種花" : userRole === "force_bloom" ? "🎯強開" : "👑伸手黨"}</span>
+                    <span>{userRole === "planting" ? "🚶‍♂️種花" : userRole === "force_bloom" ? "🎯強開" : "👑 輕鬆收飄帶"}</span>
                     <i className="fa-solid fa-arrows-rotate text-[8px]"></i>
                   </button>
                 )}
@@ -2965,7 +2965,7 @@ export default function App() {
               <div className="flex items-center gap-1.5 text-pink-400 font-bold shrink-0">
                 <span className="flex items-center gap-1">
                   <i className={userRole === "planting" ? "fa-solid fa-seedling text-emerald-400" : userRole === "force_bloom" ? "fa-solid fa-circle-dot text-purple-400" : "fa-solid fa-crown text-amber-400"}></i> 
-                  <span className="xs:inline hidden">{userRole === "planting" ? "建議種花時間：" : userRole === "force_bloom" ? "建議強開時間：" : "建議伸手黨時間："}</span>
+                  <span className="xs:inline hidden">{userRole === "planting" ? "建議種花時間：" : userRole === "force_bloom" ? "建議強開時間：" : "建議輕鬆收飄帶時間："}</span>
                   <span className="xs:hidden inline">{userRole === "planting" ? "建議：" : userRole === "force_bloom" ? "建議：" : "建議："}</span>
                 </span>
                 <span className="text-white font-black bg-purple-950 px-2 py-0.5 rounded-lg border border-purple-500/30 text-[10px] sm:text-xs">
@@ -2995,7 +2995,7 @@ export default function App() {
             {userRole && (
               <div className="flex items-center gap-2 bg-slate-950/80 rounded-2xl p-2 border border-purple-500/30 text-xs">
                 <span className="text-pink-400 font-bold flex items-center gap-1">
-                  {userRole === "planting" ? "🚶‍♂️ 走路/騎車種花" : userRole === "force_bloom" ? "🎯 雷達強開花" : "👑 伸手黨直接收割"}
+                  {userRole === "planting" ? "🚶‍♂️ 走路/騎車種花" : userRole === "force_bloom" ? "🎯 雷達強開花" : "👑 輕鬆種花收飄帶"}
                 </span>
                 <button
                   onClick={() => {
@@ -3909,7 +3909,7 @@ export default function App() {
                     : "border-transparent text-slate-400 hover:text-slate-300"
                 }`}
               >
-                👑 伸手黨收割
+                👑 輕鬆收飄帶
               </button>
             </div>
 
@@ -3956,7 +3956,7 @@ export default function App() {
                   return (
                     <div className="space-y-4">
                       <p className="text-[10px] text-slate-400 leading-relaxed bg-slate-950/40 p-2.5 rounded-xl border border-slate-800">
-                        💡 <strong>連續種花原理：</strong> 系統已自動將您欲種植的點位，以每條 5 花點（考慮 6 分鐘種花 + 移動時間與大花存活時間）為基準分組，並推薦最優順序與時間。點選以下路線卡片，可切換地圖高亮該路線！
+                        💡 <strong>連續種花原理：</strong> 系統已自動將您欲種植的點位，以每條 4 花點（1 小時內至少種 4 株，考慮 6 分鐘種花 + 移動時間與大花存活時間）為基準分組，並推薦最優順序與時間。點選以下路線卡片，可切換地圖高亮該路線！
                       </p>
 
                       <div className="space-y-3 max-h-[350px] overflow-y-auto pr-1">
@@ -4136,7 +4136,7 @@ export default function App() {
                   if (routes.length === 0) {
                     return (
                       <div className="py-6 text-center text-xs text-slate-500 bg-slate-950/40 rounded-2xl border border-slate-800">
-                        ⚠️ 當前無可規劃的伸手黨花卉點位！(最少需要 5 朵花)
+                        ⚠️ 當前無可規劃的輕鬆收飄帶花卉點位！
                       </div>
                     );
                   }
@@ -4144,7 +4144,7 @@ export default function App() {
                   return (
                     <div className="space-y-4">
                       <p className="text-[10px] text-slate-400 leading-relaxed bg-slate-950/40 p-2.5 rounded-xl border border-slate-800">
-                        💡 <strong>連續收割原理：</strong> 系統已自動將當前花卉點位以最少 5 朵大花直接收割（不需自己停留 6 分鐘種植，順路前往）為基準分組，推薦最優直接收割出發時間。點選卡片可於地圖高亮路線！
+                        💡 <strong>連續收割原理：</strong> 系統已自動將當前花卉點位以「30分鐘內最省力收割最多果實」之標準規劃路線，推薦最優出發時間。點選卡片可於地圖高亮路線！
                       </p>
 
                       <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
@@ -4173,11 +4173,11 @@ export default function App() {
                                 <div className="flex items-center gap-2">
                                   <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: colorInfo.hex }} />
                                   <span className="text-xs font-black text-slate-100">
-                                    直接收割路線 {rIdx + 1} ({colorInfo.name})
+                                    輕鬆收飄帶路線 {rIdx + 1} ({colorInfo.name})
                                   </span>
                                 </div>
                                 <span className="text-[11px] font-extrabold text-amber-400">
-                                  👑 {route.path.length} 朵大花直接收割
+                                  👑 {route.path.length} 朵大花輕鬆收
                                 </span>
                               </div>
 
@@ -4217,7 +4217,7 @@ export default function App() {
                                         <div key={idx} className="flex items-start gap-1.5 py-1">
                                           <span className="bg-emerald-500/20 text-emerald-400 w-3.5 h-3.5 rounded-full flex items-center justify-center font-bold text-[8px] shrink-0 mt-0.5">起</span>
                                           <div className="flex flex-col">
-                                            <span className="font-bold text-slate-200">#{hNum} {name} (伸手起點)</span>
+                                            <span className="font-bold text-slate-200">#{hNum} {name} (起點)</span>
                                             <span className="text-[9px] text-cyan-400 font-medium mt-0.5">
                                               🎗️ 預估飄帶：{formatTimeFromMs(ribbonStart)} ~ {formatTimeFromMs(ribbonEnd)}
                                             </span>
@@ -4278,7 +4278,7 @@ export default function App() {
                                   style={{ backgroundColor: colorInfo.hex }}
                                 >
                                   <i className="fa-solid fa-map-location-dot"></i>
-                                  <span>開啟 {colorInfo.name} 路線 Google Maps 伸手黨直接收割導航</span>
+                                  <span>開啟 {colorInfo.name} 路線 Google Maps 輕鬆收飄帶導航</span>
                                 </button>
                               </div>
                             </div>
