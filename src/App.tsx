@@ -3142,11 +3142,11 @@ export default function App() {
   const generateFreeloaderScheduleText = () => {
     const routes = getMultiplePlantingRoutes("freeloader");
     if (routes.length === 0) {
-      return "當前無可規劃的輕鬆收飄帶路線，請先確認花朵開花狀態或同步試算表！";
+      return "當前無可規劃的飄帶路線，請先確認花朵開花狀態或同步試算表！";
     }
 
     let text = "========================================\n";
-    text += "   🌸 本日輕鬆收飄帶路線整合時刻表 🌸\n";
+    text += "   🌸 本日所有飄帶路線時刻表 🌸\n";
     text += "========================================\n";
     text += `生成時間：${new Date().toLocaleString()}\n`;
     text += `移動時速：${plantingSpeed} km/h\n\n`;
@@ -4118,7 +4118,7 @@ export default function App() {
             <div className="flex items-center justify-between pb-3.5 border-b border-slate-800">
               <h3 className="font-black text-sm text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-orange-400 flex items-center gap-2">
                 <i className="fa-solid fa-calendar-days text-amber-400"></i>
-                輕鬆收飄帶路線整合時刻表
+                本日所有飄帶路線時刻表
               </h3>
               <button onClick={() => setShowFreeloaderSchedule(false)} className="text-slate-500 hover:text-slate-300 transition duration-150">
                 <i className="fa-solid fa-circle-xmark text-lg"></i>
@@ -4127,7 +4127,7 @@ export default function App() {
 
             <div className="py-4 flex-1 overflow-y-auto min-h-0 text-left">
               <p className="text-[10px] text-slate-400 mb-3 bg-slate-950/40 p-2 rounded-lg border border-slate-800/60 leading-relaxed">
-                💡 這是今日所有輕鬆收飄帶路線的整合純文字時刻表。點選下方按鈕可「一鍵複製」，極度適合傳送到 LINE、Discord 或個人紀錄！
+                💡 這是今日所有飄帶路線的整合純文字時刻表。點選下方按鈕可「一鍵複製」並自動關閉視窗，極度適合傳送到 LINE、Discord 或個人紀錄！
               </p>
               <textarea
                 readOnly
@@ -4140,8 +4140,9 @@ export default function App() {
               <button
                 onClick={() => {
                   navigator.clipboard.writeText(generateFreeloaderScheduleText());
-                  showToast("📋 輕鬆收飄帶時刻表已複製到剪貼簿！");
+                  showToast("📋 本日所有飄帶路線時刻表已複製到剪貼簿！");
                   playSynthChime();
+                  setShowFreeloaderSchedule(false);
                 }}
                 className="flex-1 py-2.5 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-slate-950 font-black text-xs transition duration-150 active:scale-95 flex items-center justify-center gap-2 shadow-lg shadow-amber-500/10"
               >
@@ -4642,7 +4643,7 @@ export default function App() {
                   className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-amber-500/10 via-orange-500/10 to-amber-500/10 hover:from-amber-500/20 hover:to-orange-500/20 text-amber-400 border border-amber-500/30 font-black text-xs transition duration-150 active:scale-95 flex items-center justify-center gap-2 shadow"
                 >
                   <i className="fa-solid fa-calendar-days text-[13px]"></i>
-                  <span>生成本日所有路線收飄帶時刻表 (全文字格式)</span>
+                  <span>生成本日所有飄帶路線時刻表 (全文字格式)</span>
                 </button>
 
                 {/* Speed Selector */}
