@@ -3154,6 +3154,7 @@ export default function App() {
     routes.forEach((route, rIdx) => {
       const colorInfo = ROUTE_COLORS[rIdx % ROUTE_COLORS.length];
       text += `📍 [路線 ${rIdx + 1}] ${colorInfo.name}路線 (預估 ${route.recommendedStartTime})\n`;
+      text += `   🔮 預估收發光果實：${route.steps.length} 顆\n`;
       text += `   總長度: ${(route.totalDistance / 1000).toFixed(2)} km | 移動時間: ${Math.round(route.totalTravelTime / 60)} 分鐘\n`;
       text += `----------------------------------------\n`;
 
@@ -4722,8 +4723,10 @@ export default function App() {
                                     輕鬆收飄帶路線 {rIdx + 1} ({colorInfo.name})
                                   </span>
                                 </div>
-                                <span className="text-[11px] font-extrabold text-amber-400">
-                                  👑 {route.path.length} 朵大花輕鬆收
+                                <span className="text-[11px] font-extrabold text-amber-400 flex items-center gap-1">
+                                  <span>👑 {route.path.length} 朵大花</span>
+                                  <span className="text-slate-500">•</span>
+                                  <span className="text-cyan-400">🔮 預估收 {route.path.length} 顆發光果實</span>
                                 </span>
                               </div>
 
