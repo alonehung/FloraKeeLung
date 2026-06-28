@@ -4384,8 +4384,20 @@ export default function App() {
                   const routes = getMultiplePlantingRoutes();
                   if (routes.length === 0) {
                     return (
-                      <div className="py-6 text-center text-xs text-slate-500 bg-slate-950/40 rounded-2xl border border-slate-800">
-                        ⚠️ 當前無可規劃的目標花卉點位！
+                      <div className="py-6 px-4 text-center text-xs text-slate-400 bg-slate-950/40 rounded-2xl border border-slate-800 space-y-3">
+                        <p className="text-slate-200 font-bold">⚠️ 當前無可規劃的目標花卉點位！</p>
+                        <p className="text-[10px] text-slate-400 leading-relaxed max-w-sm mx-auto">
+                          可能因為目前沒有大花處於剛好能連續種植 6 分鐘的重疊時間。建議您可以切換至「輕鬆收飄帶」模式，前往仍有飄帶的大花點位散步。
+                        </p>
+                        <div className="pt-1">
+                          <button
+                            onClick={() => setNavModalTab("freeloader")}
+                            className="px-3.5 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 font-bold transition text-[11px] active:scale-95 inline-flex items-center gap-1.5 shadow"
+                          >
+                            <i className="fa-solid fa-crown text-[10px]"></i>
+                            <span>切換至「輕鬆收飄帶」路線</span>
+                          </button>
+                        </div>
                       </div>
                     );
                   }
