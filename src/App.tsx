@@ -5370,20 +5370,6 @@ ${trackPointsXml}
                                   <span>生成並下載 {colorInfo.name} 路線 GPX 軌跡檔</span>
                                 </button>
                               </div>
-
-                              {/* Route Image generation button */}
-                              <div className="mt-2">
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    downloadRouteImage(route, colorInfo, rIdx);
-                                  }}
-                                  className="w-full bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700/60 font-extrabold py-2 px-3 rounded-xl text-[11px] transition shadow-md flex items-center justify-center gap-1.5 active:scale-95"
-                                >
-                                  <i className="fa-solid fa-file-image text-emerald-400"></i>
-                                  <span>生成並下載 {colorInfo.name} 路線圖 (手機直式分享)</span>
-                                </button>
-                              </div>
                             </div>
                           );
                         })}
