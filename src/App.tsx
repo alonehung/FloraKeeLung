@@ -3217,6 +3217,55 @@ ${trackPointsXml}
     showToast(`📥 已開始下載 <科學種花>${dateStr},路線${routeIndex + 1}_${landmarkName}.gpx`);
   };
 
+  const downloadFullRouteGPXFile = (routeData: any, routeIndex: number) => {
+    if (!routeData || !routeData.steps || routeData.steps.length === 0) return;
+    
+    const nowTime = new Date();
+    const HH = nowTime.getHours().toString().padStart(2, '0');
+    const MM = nowTime.getMinutes().toString().padStart(2, '0');
+    const SS = nowTime.getSeconds().toString().padStart(2, '0');
+    const msVal = nowTime.getMilliseconds().toString().substring(0, 2).padStart(2, '0');
+    const hhmm = `${HH}${MM}`;
+    const ssmm = `${SS}${msVal}`;
+    
+    const yyyy = nowTime.getFullYear();
+    const month = (nowTime.getMonth() + 1).toString().padStart(2, '0');
+    const dateNum = nowTime.getDate().toString().padStart(2, '0');
+    const dateStr = `${yyyy}${month}${dateNum}`;
+
+    const trackPointsXml = routeData.steps.map((step: any) => {
+      const landmark = step.landmark;
+      const ptLat = landmark.lat.toFixed(7);
+      const ptLon = landmark.lng.toFixed(7);
+      return `<trkpt lat="${ptLat}" lon="${ptLon}"></trkpt>`;
+    }).join("\n");
+
+    const nameTag = `(JoyStick)完整路線_${hhmm}${ssmm}`;
+
+    const xmlContent = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="warmwind-gpx">
+<metadata><name>${nameTag}</name></metadata>
+<trk>
+<name>${nameTag}</name>
+<trkseg>
+${trackPointsXml}
+</trkseg>
+</trk>
+</gpx>`;
+
+    const blob = new Blob([xmlContent], { type: "application/gpx+xml;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    const colorInfo = ROUTE_COLORS[routeIndex % ROUTE_COLORS.length] || ROUTE_COLORS[0];
+    link.setAttribute("download", `<科學種花>${dateStr},完整路線${routeIndex + 1}_${colorInfo.name}.gpx`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    showToast(`📥 已開始下載 <科學種花>${dateStr},完整路線${routeIndex + 1}_${colorInfo.name}之完整軌跡.gpx`);
+  };
+
   const generateFreeloaderScheduleText = () => {
     const routes = getMultiplePlantingRoutes("freeloader");
     if (routes.length === 0) {
@@ -4681,7 +4730,18 @@ ${trackPointsXml}
               </div>
 
               {/* Footer */}
-              <div className="pt-4 border-t border-slate-800 flex justify-end mt-3">
+              <div className="pt-4 border-t border-slate-800 flex justify-between items-center mt-3 gap-2">
+                <button 
+                  type="button"
+                  onClick={() => {
+                    downloadFullRouteGPXFile(scientificRouteData, scientificRouteIndex);
+                    playSynthChime();
+                  }} 
+                  className="bg-pink-600 hover:bg-pink-700 text-white font-extrabold px-4 py-2 rounded-xl text-xs transition flex items-center gap-1.5 active:scale-95 shadow-md"
+                >
+                  <i className="fa-solid fa-route"></i>
+                  <span>📥 下載完整路線 GPX</span>
+                </button>
                 <button 
                   onClick={() => setShowScientificGPXModal(false)} 
                   className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold px-4 py-2 rounded-xl text-xs transition active:scale-95"
