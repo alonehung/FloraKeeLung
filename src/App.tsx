@@ -333,7 +333,7 @@ export default function App() {
   const [activeRegion] = useState("keelung");
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [sortSelector, setSortSelector] = useState("id_asc");
+  const [sortSelector, setSortSelector] = useState("time_asc");
   const [soundEnabled, setSoundEnabled] = useState(true);
 
   // Time ticker
@@ -2451,14 +2451,25 @@ export default function App() {
     } else if (activeSort === 'id_desc') {
       return b.id - a.id;
     } else if (activeSort === 'time_asc') {
-      if (!a.isBlooming && b.isBlooming) return 1;
-      if (a.isBlooming && !b.isBlooming) return -1;
-      if (!a.isBlooming && !b.isBlooming) {
-        if (a.statusKey === 'pending_report' && b.statusKey !== 'pending_report') return -1;
-        if (a.statusKey !== 'pending_report' && b.statusKey === 'pending_report') return 1;
-        return a.id - b.id;
+      const getPriority = (status: string) => {
+        if (status === 'leaf') return 1;
+        if (status === 'dying') return 2;
+        if (status === 'pending_report') return 3;
+        if (status === 'blooming' || status === 'ribbon') return 4;
+        return 9;
+      };
+      
+      const priA = getPriority(a.statusKey);
+      const priB = getPriority(b.statusKey);
+      
+      if (priA !== priB) {
+        return priA - priB;
       }
-      return a.remainingSecs - b.remainingSecs;
+      
+      if (a.statusKey === 'dying' || a.statusKey === 'blooming' || a.statusKey === 'ribbon') {
+        return a.remainingSecs - b.remainingSecs;
+      }
+      return a.id - b.id;
     } else if (activeSort === 'time_desc') {
       if (!a.isBlooming && b.isBlooming) return 1;
       if (a.isBlooming && !b.isBlooming) return -1;
