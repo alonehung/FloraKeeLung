@@ -3157,11 +3157,9 @@ export default function App() {
   };
 
   const downloadGPXFile = (lat: number, lon: number, landmarkName: string, routeIndex: number) => {
-    const C_lat = 25.131147;
-    const C_lon = 121.740986;
-
-    const offsets = [
-      { dLat: 0.0008085, dLon: 0.0 },
+    const bufferOffset = { dLat: 0.0008085, dLon: 0.0 };
+    const centerOffset = { dLat: 0.0, dLon: 0.0 };
+    const orbitOffsets = [
       { dLat: 0.0002695, dLon: 0.0 },
       { dLat: 0.0001906, dLon: 0.0002105 },
       { dLat: 0.0,       dLon: 0.0002977 },
@@ -3172,6 +3170,8 @@ export default function App() {
       { dLat: 0.0001906,  dLon: -0.0002105 },
       { dLat: 0.0002695,  dLon: 0.0 }
     ];
+
+    const targetOffsets = [bufferOffset, centerOffset, ...orbitOffsets];
 
     const nowTime = new Date();
     const HH = nowTime.getHours().toString().padStart(2, '0');
@@ -3186,7 +3186,7 @@ export default function App() {
     const dateNum = nowTime.getDate().toString().padStart(2, '0');
     const dateStr = `${yyyy}${month}${dateNum}`;
 
-    const trackPointsXml = offsets.map(offset => {
+    const trackPointsXml = targetOffsets.map(offset => {
       const ptLat = (lat + offset.dLat).toFixed(7);
       const ptLon = (lon + offset.dLon).toFixed(7);
       return `<trkpt lat="${ptLat}" lon="${ptLon}"></trkpt>`;
@@ -3221,8 +3221,9 @@ ${trackPointsXml}
   const downloadFullRouteGPXFile = (routeData: any, routeIndex: number) => {
     if (!routeData || !routeData.steps || routeData.steps.length === 0) return;
     
-    const offsets = [
-      { dLat: 0.0008085, dLon: 0.0 },
+    const bufferOffset = { dLat: 0.0008085, dLon: 0.0 };
+    const centerOffset = { dLat: 0.0, dLon: 0.0 };
+    const orbitOffsets = [
       { dLat: 0.0002695, dLon: 0.0 },
       { dLat: 0.0001906, dLon: 0.0002105 },
       { dLat: 0.0,       dLon: 0.0002977 },
@@ -3247,9 +3248,14 @@ ${trackPointsXml}
     const dateNum = nowTime.getDate().toString().padStart(2, '0');
     const dateStr = `${yyyy}${month}${dateNum}`;
 
-    const trackPointsXml = routeData.steps.flatMap((step: any) => {
+    const trackPointsXml = routeData.steps.flatMap((step: any, sIdx: number) => {
       const landmark = step.landmark;
-      return offsets.map(offset => {
+      // Only the first step (sIdx === 0) gets the bufferOffset
+      const pointOffsets = sIdx === 0 
+        ? [bufferOffset, centerOffset, ...orbitOffsets] 
+        : [centerOffset, ...orbitOffsets];
+
+      return pointOffsets.map(offset => {
         const ptLat = (landmark.lat + offset.dLat).toFixed(7);
         const ptLon = (landmark.lng + offset.dLon).toFixed(7);
         return `<trkpt lat="${ptLat}" lon="${ptLon}"></trkpt>`;
