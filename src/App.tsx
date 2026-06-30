@@ -349,6 +349,12 @@ export default function App() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncedTime, setLastSyncedTime] = useState<Date | null>(null);
   const [showFreeloaderSchedule, setShowFreeloaderSchedule] = useState(false);
+  const [showBusRouteModal, setShowBusRouteModal] = useState(false);
+  const [selectedBusRouteData, setSelectedBusRouteData] = useState<any | null>(null);
+  const [selectedBusRouteIndex, setSelectedBusRouteIndex] = useState<number>(0);
+  const [showScientificGPXModal, setShowScientificGPXModal] = useState(false);
+  const [scientificRouteData, setScientificRouteData] = useState<any | null>(null);
+  const [scientificRouteIndex, setScientificRouteIndex] = useState<number>(0);
 
   // Command panel
   const [commandInput, setCommandInput] = useState("");
@@ -3150,6 +3156,67 @@ export default function App() {
     playSynthChime();
   };
 
+  const downloadGPXFile = (lat: number, lon: number, landmarkName: string, routeIndex: number) => {
+    const C_lat = 25.131147;
+    const C_lon = 121.740986;
+
+    const offsets = [
+      { dLat: 0.0008085, dLon: 0.0 },
+      { dLat: 0.0002695, dLon: 0.0 },
+      { dLat: 0.0001906, dLon: 0.0002105 },
+      { dLat: 0.0,       dLon: 0.0002977 },
+      { dLat: -0.0001906, dLon: 0.0002105 },
+      { dLat: -0.0002695, dLon: 0.0 },
+      { dLat: -0.0001906, dLon: -0.0002105 },
+      { dLat: 0.0,       dLon: -0.0002977 },
+      { dLat: 0.0001906,  dLon: -0.0002105 },
+      { dLat: 0.0002695,  dLon: 0.0 }
+    ];
+
+    const nowTime = new Date();
+    const HH = nowTime.getHours().toString().padStart(2, '0');
+    const MM = nowTime.getMinutes().toString().padStart(2, '0');
+    const SS = nowTime.getSeconds().toString().padStart(2, '0');
+    const msVal = nowTime.getMilliseconds().toString().substring(0, 2).padStart(2, '0');
+    const hhmm = `${HH}${MM}`;
+    const ssmm = `${SS}${msVal}`;
+    
+    const yyyy = nowTime.getFullYear();
+    const month = (nowTime.getMonth() + 1).toString().padStart(2, '0');
+    const dateNum = nowTime.getDate().toString().padStart(2, '0');
+    const dateStr = `${yyyy}${month}${dateNum}`;
+
+    const trackPointsXml = offsets.map(offset => {
+      const ptLat = (lat + offset.dLat).toFixed(7);
+      const ptLon = (lon + offset.dLon).toFixed(7);
+      return `<trkpt lat="${ptLat}" lon="${ptLon}"></trkpt>`;
+    }).join("\n");
+
+    const nameTag = `(JoyStick)繞圈版_${hhmm}${ssmm}(${lat.toFixed(7)},${lon.toFixed(7)})`;
+
+    const xmlContent = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="warmwind-gpx">
+<metadata><name>${nameTag}</name></metadata>
+<trk>
+<name>${nameTag}</name>
+<trkseg>
+${trackPointsXml}
+</trkseg>
+</trk>
+</gpx>`;
+
+    const blob = new Blob([xmlContent], { type: "application/gpx+xml;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", `<科學種花>${dateStr},路線${routeIndex + 1}_${landmarkName}.gpx`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    showToast(`📥 已開始下載 <科學種花>${dateStr},路線${routeIndex + 1}_${landmarkName}.gpx`);
+  };
+
   const generateFreeloaderScheduleText = () => {
     const routes = getMultiplePlantingRoutes("freeloader");
     if (routes.length === 0) {
@@ -4376,6 +4443,257 @@ export default function App() {
         </div>
       )}
 
+      {/* Bus Route Map Modal */}
+      {showBusRouteModal && selectedBusRouteData && (() => {
+        const colorInfo = ROUTE_COLORS[selectedBusRouteIndex % ROUTE_COLORS.length] || ROUTE_COLORS[0];
+        return (
+          <div className="fixed inset-0 z-[100] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-lg p-6 shadow-2xl flex flex-col max-h-[85vh] animate-in fade-in zoom-in-95 duration-200">
+              <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-center">
+                    <i className="fa-solid fa-bus text-lg" style={{ color: colorInfo.hex }}></i>
+                  </div>
+                  <div>
+                    <h3 className="font-black text-sm sm:text-base text-slate-100 flex items-center gap-1.5">
+                      {colorInfo.name}路線公車式時刻表
+                    </h3>
+                    <p className="text-[10px] text-slate-400 font-bold">路線 {selectedBusRouteIndex + 1} • 連續種花極速導航</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setShowBusRouteModal(false)} 
+                  className="text-slate-500 hover:text-slate-300 p-1.5 rounded-full hover:bg-slate-800 transition"
+                >
+                  <i className="fa-solid fa-circle-xmark text-lg"></i>
+                </button>
+              </div>
+
+              {/* Route Summary Stats */}
+              <div className="grid grid-cols-3 gap-2 py-3 bg-slate-950/60 rounded-2xl border border-slate-850 p-3 mt-3 text-center">
+                <div>
+                  <span className="text-[9px] text-slate-500 font-bold block">🏁 總站數</span>
+                  <span className="text-xs font-black text-slate-200">{selectedBusRouteData.steps.length} 站</span>
+                </div>
+                <div>
+                  <span className="text-[9px] text-slate-500 font-bold block">⏱️ 預估總時間</span>
+                  <span className="text-xs font-black text-slate-200">
+                    {Math.floor(selectedBusRouteData.totalDuration / 60)} 分 {Math.round(selectedBusRouteData.totalDuration % 60)} 秒
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[9px] text-slate-500 font-bold block">🚴 移動時速</span>
+                  <span className="text-xs font-black text-slate-200">{plantingSpeed} km/h</span>
+                </div>
+              </div>
+
+              {/* Bus Stop Vertical Map */}
+              <div className="flex-1 overflow-y-auto py-4 my-2 px-2 space-y-0.5 max-h-[50vh]">
+                {selectedBusRouteData.steps.map((step: any, idx: number) => {
+                  const landmark = step.landmark;
+                  const isBlooming = landmark.expire ? new Date(landmark.expire).getTime() > now : false;
+                  const leafTime = isBlooming ? new Date(landmark.expire).getTime() : now;
+                  const formatTimeFromMs = (ms: number) => {
+                    const d = new Date(ms);
+                    return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+                  };
+
+                  const isLast = idx === selectedBusRouteData.steps.length - 1;
+
+                  return (
+                    <div key={idx} className="flex flex-col">
+                      {/* Station Row */}
+                      <div className="flex items-center gap-3">
+                        {/* Time label */}
+                        <div className="w-16 text-right shrink-0">
+                          <p className="text-[11px] font-black text-emerald-400">
+                            {step.arrivalTimeMs ? formatTimeFromMs(step.arrivalTimeMs) : "立即"}
+                          </p>
+                          <p className="text-[8px] text-slate-500 font-bold">預估到達</p>
+                        </div>
+
+                        {/* Node segment */}
+                        <div className="relative flex flex-col items-center shrink-0">
+                          {/* Top part of line */}
+                          <div 
+                            className="w-1" 
+                            style={{ 
+                              height: "14px", 
+                              backgroundColor: idx === 0 ? "transparent" : colorInfo.hex 
+                            }} 
+                          />
+                          {/* Ring Station Circle */}
+                          <div 
+                            className="w-7 h-7 rounded-full border-4 bg-slate-900 flex items-center justify-center font-black text-xs shadow-md transition z-10"
+                            style={{ borderColor: colorInfo.hex, color: colorInfo.hex }}
+                          >
+                            {idx + 1}
+                          </div>
+                          {/* Bottom part of line */}
+                          <div 
+                            className="w-1 flex-1" 
+                            style={{ 
+                              height: "14px", 
+                              backgroundColor: isLast ? "transparent" : colorInfo.hex 
+                            }} 
+                          />
+                        </div>
+
+                        {/* Station details */}
+                        <div className="flex-1 bg-slate-950/40 border border-slate-850 p-2.5 rounded-2xl flex items-center justify-between gap-2">
+                          <div className="flex flex-col min-w-0">
+                            <span className="font-bold text-xs text-slate-200 truncate">
+                              #{landmark.id} {landmark.name}
+                            </span>
+                            <span className="text-[9px] text-slate-400 mt-0.5 flex items-center gap-1">
+                              <span>🍃 {isBlooming ? `變葉時間：${formatTimeFromMs(leafTime)}` : "狀態：綠葉"}</span>
+                            </span>
+                          </div>
+                          
+                          {/* Action badge */}
+                          <span className="text-[9px] shrink-0 font-extrabold px-2 py-0.5 rounded-full border bg-pink-500/10 text-pink-400 border-pink-500/20 flex items-center gap-1">
+                            <i className="fa-solid fa-seedling text-[8px] text-emerald-400"></i>
+                            <span>種植 6 分鐘</span>
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Connection row */}
+                      {!isLast && (
+                        <div className="flex items-center gap-3">
+                          {/* Empty Time label spacer */}
+                          <div className="w-16 shrink-0" />
+
+                          {/* Connecting track line */}
+                          <div className="relative flex flex-col items-center shrink-0" style={{ height: "40px" }}>
+                            <div className="w-1 h-full" style={{ backgroundColor: colorInfo.hex }} />
+                            <div className="absolute top-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center shadow z-10">
+                              <i className={`fa-solid ${plantingSpeed === 5 ? "fa-person-walking" : "fa-motorcycle"} text-[8px] text-slate-400`}></i>
+                            </div>
+                          </div>
+
+                          {/* Connecting info text */}
+                          <div className="flex-1 pl-3 text-[10px] text-slate-500 italic font-medium">
+                            移動 {step.distance >= 1000 ? `${(step.distance / 1000).toFixed(2)} km` : `${Math.round(step.distance)} 米`} 
+                            <span className="mx-1 text-slate-700">•</span>
+                            約花費 {Math.round(step.travelTime / 60)} 分鐘
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Modal Footer buttons */}
+              <div className="pt-4 border-t border-slate-800 flex gap-2 justify-end mt-2">
+                <button 
+                  onClick={() => {
+                    const text = selectedBusRouteData.steps.map((s: any, idx: number) => {
+                      const timeStr = s.arrivalTimeMs ? new Date(s.arrivalTimeMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "立即";
+                      return `[第 ${idx+1} 站] #${s.landmark.id} ${s.landmark.name} (${timeStr} 抵達)`;
+                    }).join("\n");
+                    navigator.clipboard.writeText(`🚌 ${colorInfo.name}路線公車時刻表:\n` + text);
+                    showToast("📋 路線站牌時刻表已複製到剪貼簿！");
+                    playSynthChime();
+                  }}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold px-4 py-2 rounded-xl text-xs transition flex items-center gap-1.5 active:scale-95"
+                >
+                  <i className="fa-solid fa-copy"></i>
+                  <span>複製站牌文字</span>
+                </button>
+                <button 
+                  onClick={() => setShowBusRouteModal(false)} 
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold px-4 py-2 rounded-xl text-xs transition active:scale-95"
+                >
+                  關閉
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Scientific GPX Download Modal */}
+      {showScientificGPXModal && scientificRouteData && (() => {
+        return (
+          <div className="fixed inset-0 z-[100] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md p-6 shadow-2xl flex flex-col max-h-[80vh] animate-in fade-in zoom-in-95 duration-200">
+              <div className="flex items-center justify-between pb-3.5 border-b border-slate-800">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-xl bg-pink-500/10 border border-pink-500/20 text-pink-400">
+                    <i className="fa-solid fa-wand-magic-sparkles text-base"></i>
+                  </div>
+                  <div>
+                    <h3 className="font-black text-sm sm:text-base text-slate-100">
+                      科學種花 GPX 下載
+                    </h3>
+                    <p className="text-[10px] text-slate-400 font-bold">路線 {scientificRouteIndex + 1} • 單點 90 米圓形繞圈軌跡</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setShowScientificGPXModal(false)} 
+                  className="text-slate-500 hover:text-slate-300 p-1.5 rounded-full hover:bg-slate-800 transition"
+                >
+                  <i className="fa-solid fa-circle-xmark text-lg"></i>
+                </button>
+              </div>
+
+              <div className="my-3 p-3 bg-slate-950/60 rounded-2xl border border-slate-850/60">
+                <p className="text-[10px] text-slate-300 leading-relaxed">
+                  💡 <strong>什麼是科學種花？</strong><br />
+                  使用 GPS 搖桿工具時，匯入此 GPX 軌跡，能以精準的 <strong>90米半徑</strong> 圓形路線圍繞大花中心點自動循環走動（10路徑點閉合軌跡），幫助您在免除肉體疲勞的情況下，以最高效率把大花種開！
+                </p>
+              </div>
+
+              {/* Scrollable list of flowers */}
+              <div className="flex-1 overflow-y-auto space-y-2 py-1 max-h-[40vh] pr-1">
+                {scientificRouteData.steps.map((step: any, idx: number) => {
+                  const landmark = step.landmark;
+                  return (
+                    <div 
+                      key={idx} 
+                      className="p-3 bg-slate-950/40 hover:bg-slate-950/70 rounded-2xl border border-slate-850 flex items-center justify-between gap-3 transition"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className="w-5 h-5 rounded-full bg-slate-900 border border-slate-800 text-[10px] font-black text-slate-300 flex items-center justify-center">
+                          {idx + 1}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="font-bold text-xs text-slate-100 truncate">#{landmark.id} {landmark.name}</p>
+                          <p className="text-[9px] text-slate-500 font-mono mt-0.5 truncate">
+                            ({landmark.lat.toFixed(5)}, {landmark.lng.toFixed(5)})
+                          </p>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => downloadGPXFile(landmark.lat, landmark.lng, landmark.name, scientificRouteIndex)}
+                        className="py-1.5 px-3 rounded-xl bg-pink-600/20 hover:bg-pink-600/30 border border-pink-500/30 text-pink-400 font-extrabold text-[11px] transition duration-150 active:scale-95 flex items-center gap-1 shrink-0 shadow"
+                      >
+                        <i className="fa-solid fa-cloud-arrow-down text-[10px]"></i>
+                        <span>下載 GPX</span>
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Footer */}
+              <div className="pt-4 border-t border-slate-800 flex justify-end mt-3">
+                <button 
+                  onClick={() => setShowScientificGPXModal(false)} 
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold px-4 py-2 rounded-xl text-xs transition active:scale-95"
+                >
+                  關閉
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Navigation Modal */}
       {showNavModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-md flex items-end sm:items-center justify-center p-4">
@@ -4614,7 +4932,7 @@ export default function App() {
                               )}
 
                               {/* Direct Google Maps Navigation button matching color */}
-                              <div className="mt-3">
+                              <div className="mt-3 space-y-2">
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation(); // prevent card re-select trigger
@@ -4638,6 +4956,39 @@ export default function App() {
                                   <i className="fa-solid fa-map-location-dot"></i>
                                   <span>開啟 {colorInfo.name} 路線 Google Maps 連續種花導航</span>
                                 </button>
+
+                                {isSelected && (
+                                  <div className="grid grid-cols-2 gap-2 mt-2">
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedBusRouteData(route);
+                                        setSelectedBusRouteIndex(rIdx);
+                                        setShowBusRouteModal(true);
+                                        playSynthChime();
+                                      }}
+                                      className="py-2.5 px-3 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 font-extrabold text-[11px] transition duration-150 active:scale-95 flex items-center justify-center gap-1.5 shadow"
+                                    >
+                                      <i className="fa-solid fa-route text-[11px]"></i>
+                                      <span>🗺️ 生成路線圖</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setScientificRouteData(route);
+                                        setScientificRouteIndex(rIdx);
+                                        setShowScientificGPXModal(true);
+                                        playSynthChime();
+                                      }}
+                                      className="py-2.5 px-3 rounded-xl bg-pink-600/20 hover:bg-pink-600/30 border border-pink-500/40 text-pink-300 font-extrabold text-[11px] transition duration-150 active:scale-95 flex items-center justify-center gap-1.5 shadow"
+                                    >
+                                      <i className="fa-solid fa-wand-magic-sparkles text-[11px]"></i>
+                                      <span>⚡ 科學種花 GPX</span>
+                                    </button>
+                                  </div>
+                                )}
                               </div>
                             </div>
                           );
