@@ -356,6 +356,24 @@ export default function App() {
   const [scientificRouteData, setScientificRouteData] = useState<any | null>(null);
   const [scientificRouteIndex, setScientificRouteIndex] = useState<number>(0);
 
+  // Checkbox selection state for landmarks
+  const [checkedPointIds, setCheckedPointIds] = useState<Record<number, boolean>>({});
+
+  const handleToggleCheckAll = (checked: boolean) => {
+    const updated = { ...checkedPointIds };
+    sortedPoints.forEach(p => {
+      updated[p.id] = checked;
+    });
+    setCheckedPointIds(updated);
+  };
+
+  const handleToggleCheck = (id: number, checked: boolean) => {
+    setCheckedPointIds(prev => ({
+      ...prev,
+      [id]: checked
+    }));
+  };
+
   // Command panel
   const [commandInput, setCommandInput] = useState("");
   const [commandFeedback, setCommandFeedback] = useState("💡 具有編輯權限者輸入：[編號]/[小時]h[分鐘]m 可更新今天時間");
@@ -3346,6 +3364,32 @@ ${trackPointsXml}
     playSynthChime();
   };
 
+  const exportSelectedCoordinates = () => {
+    const selectedPoints = sortedPoints.filter(p => checkedPointIds[p.id]);
+    if (selectedPoints.length === 0) {
+      showToast("⚠️ 請先勾選要匯出的地標點位！");
+      playErrorBuzz();
+      return;
+    }
+    const txtContent = selectedPoints.map(p => `${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}`).join("\n");
+    const blob = new Blob([txtContent], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const nowTime = new Date();
+    const yyyy = nowTime.getFullYear();
+    const month = (nowTime.getMonth() + 1).toString().padStart(2, '0');
+    const dateNum = nowTime.getDate().toString().padStart(2, '0');
+    const dateStr = `${yyyy}${month}${dateNum}`;
+    link.href = url;
+    link.setAttribute("download", `已選經緯度_${dateStr}.txt`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    showToast(`📥 已匯出 ${selectedPoints.length} 筆經緯度文字檔！`);
+    playSynthChime();
+  };
+
   // Helper date formatting
   const formatDateLabel = (isoString: string | null) => {
     if (!isoString) return "-";
@@ -3362,6 +3406,7 @@ ${trackPointsXml}
   // Statistics counts
   const totalBloomCount = processedPoints.filter(p => p.isBlooming).length;
   const totalLeafCount = processedPoints.filter(p => !p.isBlooming).length;
+  const checkedCount = sortedPoints.filter(p => checkedPointIds[p.id]).length;
 
   if (!userRole) {
     return (
@@ -3823,10 +3868,19 @@ ${trackPointsXml}
                 
                 {/* Table Controller bar */}
                 <div className="border-b border-slate-800 bg-slate-950/80 px-6 py-4 flex flex-col gap-4">
-                  <div className="flex items-center justify-between w-full">
+                  <div className="flex items-center justify-between w-full flex-wrap gap-2">
                     <button className="text-sm font-black border-b-2 border-pink-500 pb-1 text-pink-400 transition flex items-center gap-1.5">
                       <i className="fa-solid fa-list-ol mr-1"></i> 
                       景點監控列表 (<span id="total-count-badge">{regionPoints.length}</span>)
+                    </button>
+                    
+                    <button 
+                      onClick={exportSelectedCoordinates}
+                      className="bg-pink-600 hover:bg-pink-700 text-white text-xs font-bold py-1.5 px-3 rounded-xl transition duration-150 active:scale-95 flex items-center gap-1.5 shadow-md border border-pink-500/20"
+                      title="按現有排序輸出選取的經緯度文字檔"
+                    >
+                      <i className="fa-solid fa-file-export text-[11px]"></i>
+                      <span>匯出已選經緯度 ({checkedCount})</span>
                     </button>
                   </div>
                   
@@ -3875,6 +3929,14 @@ ${trackPointsXml}
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="bg-slate-950/40 border-b border-slate-800 text-slate-400 text-[11px] font-bold tracking-wider uppercase">
+                        <th className="py-3 px-4 text-center w-12">
+                          <input 
+                            type="checkbox"
+                            checked={sortedPoints.length > 0 && sortedPoints.every(p => !!checkedPointIds[p.id])}
+                            onChange={(e) => handleToggleCheckAll(e.target.checked)}
+                            className="w-4 h-4 rounded border-slate-800 bg-slate-950 text-pink-500 focus:ring-pink-500/50 cursor-pointer"
+                          />
+                        </th>
                         <th className="py-3 px-4 text-center w-14">編號</th>
                         <th className="py-3 px-4">地標名稱 / 經緯度</th>
                         <th className="py-3 px-4">當前狀態</th>
@@ -3965,7 +4027,15 @@ ${trackPointsXml}
                           }
 
                           return (
-                            <tr key={item.id} id={`row-${item.id}`} className="hover:bg-slate-900/50 transition border-b border-slate-800/40 align-middle">
+                            <tr key={item.id} id={`row-${item.id}`} className={`hover:bg-slate-900/50 transition border-b border-slate-800/40 align-middle ${checkedPointIds[item.id] ? "bg-pink-500/5" : ""}`}>
+                              <td className="py-3 px-4 text-center" onClick={(e) => e.stopPropagation()}>
+                                <input 
+                                  type="checkbox"
+                                  checked={!!checkedPointIds[item.id]}
+                                  onChange={(e) => handleToggleCheck(item.id, e.target.checked)}
+                                  className="w-4 h-4 rounded border-slate-800 bg-slate-950 text-pink-500 focus:ring-pink-500/50 cursor-pointer"
+                                />
+                              </td>
                               <td className="py-3 px-4 text-center font-bold text-slate-500">{item.id}</td>
                               <td className="py-3 px-4 cursor-pointer" onClick={() => {
                                 if (mapRef.current) {
@@ -4060,7 +4130,7 @@ ${trackPointsXml}
                         })
                       ) : (
                         <tr>
-                          <td colSpan={5} className="text-center py-8 text-slate-500 text-xs">無符合條件的花朵點位</td>
+                          <td colSpan={6} className="text-center py-8 text-slate-500 text-xs">無符合條件的花朵點位</td>
                         </tr>
                       )}
                     </tbody>
@@ -4072,11 +4142,20 @@ ${trackPointsXml}
           ) : (
             /* Simplified mobile landmarks list strictly sorted by wither countdown */
             <div className="bg-slate-900/60 rounded-3xl p-4 border border-slate-800 flex flex-col gap-4 backdrop-blur-md">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3 flex-wrap gap-2">
                 <h2 className="font-black text-sm text-slate-100 flex items-center gap-2">
                   <i className="fa-solid fa-clock text-pink-500"></i>
                   枯萎倒數監控 ({processedPoints.filter(p => p.isBlooming).length} 朵開花中)
                 </h2>
+                
+                <button 
+                  onClick={exportSelectedCoordinates}
+                  className="bg-pink-600 hover:bg-pink-700 text-white text-[11px] font-bold py-1 px-2.5 rounded-lg transition duration-150 active:scale-95 flex items-center gap-1 shadow border border-pink-500/20"
+                  title="輸出選取的經緯度文字檔"
+                >
+                  <i className="fa-solid fa-file-export text-[9px]"></i>
+                  <span>匯出 ({checkedCount})</span>
+                </button>
               </div>
               
               {/* Quick Search bar */}
@@ -4089,6 +4168,20 @@ ${trackPointsXml}
                   className="w-full pl-9 pr-4 py-2.5 rounded-2xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-purple-500"
                 />
                 <i className="fa-solid fa-magnifying-glass absolute left-3 top-3.5 text-slate-500 text-xs"></i>
+              </div>
+
+              {/* Check All Actions */}
+              <div className="flex items-center justify-between px-1 text-xs text-slate-400">
+                <label className="flex items-center gap-1.5 cursor-pointer hover:text-slate-200">
+                  <input 
+                    type="checkbox"
+                    checked={sortedPoints.length > 0 && sortedPoints.every(p => !!checkedPointIds[p.id])}
+                    onChange={(e) => handleToggleCheckAll(e.target.checked)}
+                    className="w-3.5 h-3.5 rounded border-slate-800 bg-slate-950 text-pink-500 focus:ring-pink-500/50 cursor-pointer"
+                  />
+                  <span>全選目前點位</span>
+                </label>
+                <span className="text-[10px] text-slate-500 font-bold">已選：{checkedCount} 點</span>
               </div>
 
               {/* Scrollable list of bento-style cards */}
@@ -4157,23 +4250,33 @@ ${trackPointsXml}
                           }
                           highlightRowInTable(item.id);
                         }}
-                        className="bg-slate-950/40 border border-slate-800/60 hover:bg-slate-900/60 transition-all rounded-2xl p-3 flex items-center justify-between cursor-pointer active:scale-[0.98]"
+                        className={`bg-slate-950/40 border hover:bg-slate-900/60 transition-all rounded-2xl p-3 flex items-center justify-between cursor-pointer active:scale-[0.98] ${checkedPointIds[item.id] ? "border-pink-500/50 bg-pink-500/5" : "border-slate-800/60"}`}
                       >
-                        <div className="flex flex-col gap-0.5">
-                          <div className="font-bold text-slate-200 text-xs flex items-center gap-1.5">
-                            <span className="text-slate-500 font-mono text-[10px]">#{item.id}</span>
-                            <span className="text-slate-200">{item.name}</span>
-                            {item.isClusterMember && item.isBlooming && (
-                              <span className="text-[9px] bg-amber-500/20 border border-amber-500/30 text-amber-300 font-extrabold px-1.5 py-0.5 rounded">
-                                👑 精選
-                              </span>
-                            )}
+                        <div className="flex items-center gap-3 flex-grow">
+                          <div onClick={(e) => e.stopPropagation()} className="flex items-center">
+                            <input 
+                              type="checkbox"
+                              checked={!!checkedPointIds[item.id]}
+                              onChange={(e) => handleToggleCheck(item.id, e.target.checked)}
+                              className="w-4 h-4 rounded border-slate-800 bg-slate-950 text-pink-500 focus:ring-pink-500/50 cursor-pointer"
+                            />
                           </div>
-                          <div className="text-[9px] text-slate-500 font-medium">
-                            📍 {item.lat.toFixed(5)}, {item.lng.toFixed(5)}
+                          <div className="flex flex-col gap-0.5 flex-grow">
+                            <div className="font-bold text-slate-200 text-xs flex items-center gap-1.5">
+                              <span className="text-slate-500 font-mono text-[10px]">#{item.id}</span>
+                              <span className="text-slate-200">{item.name}</span>
+                              {item.isClusterMember && item.isBlooming && (
+                                <span className="text-[9px] bg-amber-500/20 border border-amber-500/30 text-amber-300 font-extrabold px-1.5 py-0.5 rounded">
+                                  👑 精選
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[9px] text-slate-500 font-medium">
+                              📍 {item.lat.toFixed(5)}, {item.lng.toFixed(5)}
+                            </div>
                           </div>
                         </div>
-                        <div className="flex flex-col items-end gap-1">
+                        <div className="flex flex-col items-end gap-1 flex-shrink-0">
                           {statusBadge}
                           <div className="flex items-center gap-1">
                             {countdownLabel}
