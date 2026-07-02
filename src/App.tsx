@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, ReactNode } from "react";
 import QRCode from "qrcode";
+import mqtt from "mqtt";
 
 // Declare external globals from CDN
 declare const L: any;
@@ -383,6 +384,26 @@ export default function App() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showGPXModal, setShowGPXModal] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
+
+  // MQTT & TLS Synchronization States
+  const [showMqttModal, setShowMqttModal] = useState(false);
+  const [mqttBrokerUrl, setMqttBrokerUrl] = useState("wss://broker.emqx.io:8084/mqtt");
+  const [mqttUsername, setMqttUsername] = useState("");
+  const [mqttPassword, setMqttPassword] = useState("");
+  const [mqttTopic, setMqttTopic] = useState("keelung/flowers/database");
+  const [mqttRetain, setMqttRetain] = useState(true);
+  const [mqttConnected, setMqttConnected] = useState(false);
+  const [mqttStatusText, setMqttStatusText] = useState("未連線");
+  const [mqttLogs, setMqttLogs] = useState<string[]>([]);
+  const [mqttPayloadReceived, setMqttPayloadReceived] = useState("");
+  const [mqttParsedPoints, setMqttParsedPoints] = useState<Landmark[]>([]);
+  const [mqttPasteText, setMqttPasteText] = useState("");
+  const mqttClientRef = useRef<any>(null);
+
+  const addMqttLog = (msg: string) => {
+    const timeStr = new Date().toLocaleTimeString();
+    setMqttLogs(prev => [`[${timeStr}] ${msg}`, ...prev.slice(0, 49)]);
+  };
   const [showNavModal, setShowNavModal] = useState(() => {
     const saved = localStorage.getItem("user_role");
     return (saved === "planting" || saved === "force_bloom" || saved === "freeloader");
@@ -3390,6 +3411,212 @@ ${trackPointsXml}
     playSynthChime();
   };
 
+  const connectMqttBroker = () => {
+    if (mqttClientRef.current) {
+      addMqttLog("正在中斷現有 MQTT 連線...");
+      mqttClientRef.current.end();
+      mqttClientRef.current = null;
+    }
+
+    addMqttLog(`正在建立 TLS 加密連線：${mqttBrokerUrl}...`);
+    setMqttStatusText("連線中...");
+
+    try {
+      const options: any = {
+        connectTimeout: 5000,
+        reconnectPeriod: 4000,
+      };
+      if (mqttUsername) options.username = mqttUsername;
+      if (mqttPassword) options.password = mqttPassword;
+
+      // Connect using the mqtt package
+      const client = mqtt.connect(mqttBrokerUrl, options);
+      mqttClientRef.current = client;
+
+      client.on("connect", () => {
+        setMqttConnected(true);
+        setMqttStatusText("已連線 (安全 TLS)");
+        addMqttLog("✅ SSL/TLS 安全通道建立成功！已連線至 MQTT Broker。");
+        playSynthChime();
+
+        // Auto subscribe
+        client.subscribe(mqttTopic, (err: any) => {
+          if (err) {
+            addMqttLog(`❌ 訂閱主題 ${mqttTopic} 失敗：${err.message}`);
+          } else {
+            addMqttLog(`📥 已成功訂閱主題：${mqttTopic}，等待接收數據庫更新...`);
+          }
+        });
+      });
+
+      client.on("message", (topic: string, message: Buffer) => {
+        const payload = message.toString();
+        setMqttPayloadReceived(payload);
+        addMqttLog(`📬 收到主題 [${topic}] 的資料，大小 ${payload.length} 字元`);
+        
+        try {
+          const parsed = JSON.parse(payload);
+          if (Array.isArray(parsed)) {
+            setMqttParsedPoints(parsed);
+            addMqttLog(`🎯 成功解析 ${parsed.length} 筆 MQTT 數據庫點位資料！`);
+          } else {
+            addMqttLog("⚠️ 收到非 JSON 陣列格式的資料（可能是純文字或單一對象）");
+          }
+        } catch (e: any) {
+          addMqttLog(`⚠️ 無法將 MQTT 訊息解析為 JSON 點位：${e.message}`);
+        }
+      });
+
+      client.on("error", (err: any) => {
+        addMqttLog(`❌ 連線錯誤: ${err.message}`);
+        setMqttStatusText("連線錯誤");
+        playErrorBuzz();
+      });
+
+      client.on("close", () => {
+        setMqttConnected(false);
+        setMqttStatusText("未連線");
+        addMqttLog("🔌 MQTT 連線已安全中斷。");
+      });
+
+    } catch (err: any) {
+      addMqttLog(`❌ 連線初始化失敗: ${err.message}`);
+      setMqttStatusText("失敗");
+    }
+  };
+
+  const disconnectMqttBroker = () => {
+    if (mqttClientRef.current) {
+      mqttClientRef.current.end();
+      mqttClientRef.current = null;
+    }
+  };
+
+  const publishToMqtt = (type: "checked" | "all") => {
+    if (!mqttClientRef.current || !mqttConnected) {
+      showToast("⚠️ 請先建立 MQTT 連線！");
+      playErrorBuzz();
+      return;
+    }
+
+    let pointsToPublish: Landmark[] = [];
+    if (type === "checked") {
+      pointsToPublish = sortedPoints.filter(p => checkedPointIds[p.id]);
+    } else {
+      pointsToPublish = sortedPoints;
+    }
+
+    if (pointsToPublish.length === 0) {
+      showToast("⚠️ 沒有點位可以發布！");
+      playErrorBuzz();
+      return;
+    }
+
+    addMqttLog(`正在發布 ${pointsToPublish.length} 筆點位資料至主題 ${mqttTopic}...`);
+    
+    const payload = JSON.stringify(pointsToPublish, null, 2);
+    mqttClientRef.current.publish(mqttTopic, payload, { retain: mqttRetain, qos: 1 }, (err: any) => {
+      if (err) {
+        addMqttLog(`❌ 發布失敗: ${err.message}`);
+        showToast("❌ 發布失敗！");
+        playErrorBuzz();
+      } else {
+        addMqttLog(`✅ 成功將 ${pointsToPublish.length} 筆點位發布為 MQTT 數據庫快照！(Retain=${mqttRetain})`);
+        showToast(`🚀 已同步 ${pointsToPublish.length} 筆點位至 MQTT！`);
+        playSynthChime();
+      }
+    });
+  };
+
+  const applyMqttDatabase = () => {
+    if (mqttParsedPoints.length === 0) {
+      showToast("⚠️ 當前沒有可套用的 MQTT 點位資料！");
+      playErrorBuzz();
+      return;
+    }
+
+    // Set as the active landmark list
+    setLandmarks(mqttParsedPoints);
+    localStorage.setItem(`${LOCAL_STORAGE_KEY_PREFIX}_master_list`, JSON.stringify(mqttParsedPoints));
+    showToast(`🎉 成功套用 MQTT 安全資料庫共 ${mqttParsedPoints.length} 筆地標！`);
+    playSynthChime();
+  };
+
+  const parsePastedSpreadsheet = (text: string): Landmark[] => {
+    if (!text || !text.trim()) return [];
+    const lines = text.split(/\r?\n/);
+    const parsed: Landmark[] = [];
+    
+    lines.forEach((line, index) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      
+      // Try parsing tab-separated or comma-separated values
+      const cols = trimmed.includes("\t") ? trimmed.split("\t") : trimmed.split(",");
+      if (cols.length < 2) return;
+      
+      // Let's identify the columns
+      if (cols.length === 2) {
+        const lat = parseFloat(cols[0].trim());
+        const lng = parseFloat(cols[1].trim());
+        if (!isNaN(lat) && !isNaN(lng)) {
+          parsed.push({
+            id: index + 1000,
+            name: `自訂點位 #${index + 1}`,
+            lat,
+            lng,
+            expire: null,
+            region: "keelung"
+          });
+        }
+        return;
+      }
+      
+      let id = index + 1000;
+      let name = "";
+      let lat = NaN;
+      let lng = NaN;
+      let expire: string | null = null;
+      let region = "keelung";
+      
+      if (cols.length >= 3) {
+        const firstColIsNum = !isNaN(Number(cols[0].trim()));
+        if (firstColIsNum && cols.length >= 4) {
+          id = parseInt(cols[0].trim(), 10);
+          name = cols[1].trim();
+          lat = parseFloat(cols[2].trim());
+          lng = parseFloat(cols[3].trim());
+          if (cols[4]) {
+            const expVal = cols[4].trim();
+            expire = (expVal === "null" || expVal === "") ? null : expVal;
+          }
+          if (cols[5]) region = cols[5].trim();
+        } else {
+          name = cols[0].trim();
+          lat = parseFloat(cols[1].trim());
+          lng = parseFloat(cols[2].trim());
+          if (cols[3]) {
+            const expVal = cols[3].trim();
+            expire = (expVal === "null" || expVal === "") ? null : expVal;
+          }
+        }
+      }
+      
+      if (!isNaN(lat) && !isNaN(lng)) {
+        parsed.push({
+          id,
+          name: name || `匯入點位 #${id}`,
+          lat,
+          lng,
+          expire,
+          region
+        });
+      }
+    });
+    
+    return parsed;
+  };
+
   // Helper date formatting
   const formatDateLabel = (isoString: string | null) => {
     if (!isoString) return "-";
@@ -3600,6 +3827,16 @@ ${trackPointsXml}
                     </button>
                   )}
                 </div>
+                <button 
+                  onClick={() => {
+                    setShowMqttModal(true);
+                    playSynthChime();
+                  }} 
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 p-2 rounded-xl transition" 
+                  title="MQTT 資料庫"
+                >
+                  <i className="fa-solid fa-network-wired text-xs text-pink-400"></i>
+                </button>
                 <button onClick={() => setShowConfigModal(true)} className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 p-2 rounded-xl transition" title="雲端設定">
                   <i className="fa-solid fa-sliders text-xs"></i>
                 </button>
@@ -3673,6 +3910,18 @@ ${trackPointsXml}
                 )}
               </div>
             </div>
+
+            <button 
+              onClick={() => {
+                setShowMqttModal(true);
+                playSynthChime();
+              }} 
+              className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 p-2.5 rounded-2xl transition flex items-center gap-1.5" 
+              title="MQTT TLS 加密資料庫同步"
+            >
+              <i className="fa-solid fa-network-wired text-pink-400"></i>
+              <span className="text-xs font-bold">MQTT 數據庫</span>
+            </button>
 
             <button onClick={() => setShowConfigModal(true)} className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 p-2.5 rounded-2xl transition" title="雲端設定">
               <i className="fa-solid fa-sliders text-sm"></i>
@@ -4301,6 +4550,319 @@ ${trackPointsXml}
 
         </div>
       </main>
+
+      {/* MQTT TLS Database Synchronization Modal */}
+      {showMqttModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-4xl shadow-2xl text-slate-200 overflow-hidden flex flex-col my-8 max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-6 border-b border-slate-800 bg-gradient-to-r from-slate-900 via-purple-950 to-slate-900">
+              <div className="flex items-center gap-3">
+                <div className="bg-pink-500/10 p-2.5 rounded-2xl border border-pink-500/30">
+                  <i className="fa-solid fa-network-wired text-xl text-pink-500 animate-pulse"></i>
+                </div>
+                <div>
+                  <h3 className="font-black text-base text-transparent bg-clip-text bg-gradient-to-r from-pink-400 to-purple-400">
+                    📊 Excel / Spreadsheet 轉 MQTT 加密數據庫
+                  </h3>
+                  <p className="text-slate-400 text-[10px] mt-0.5">
+                    安全地將您的 Google 試算表或本地追蹤點位，發布至具有 SSL/TLS 加密保護的 MQTT Broker。
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => {
+                  disconnectMqttBroker();
+                  setShowMqttModal(false);
+                }} 
+                className="text-slate-500 hover:text-slate-300 transition duration-150"
+              >
+                <i className="fa-solid fa-circle-xmark text-xl"></i>
+              </button>
+            </div>
+
+            {/* Connection Status Bar */}
+            <div className="bg-slate-950/50 px-6 py-2.5 border-b border-slate-800/80 flex items-center justify-between text-xs flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-slate-500 font-bold">連線狀態：</span>
+                <span className={`inline-flex items-center gap-1.5 font-bold px-2 py-0.5 rounded-full text-[10px] border ${
+                  mqttConnected 
+                    ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" 
+                    : mqttStatusText.includes("連線中")
+                    ? "bg-amber-500/10 text-amber-400 border-amber-500/20 animate-pulse"
+                    : "bg-slate-800 text-slate-400 border-slate-700"
+                }`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${mqttConnected ? "bg-emerald-400" : mqttStatusText.includes("連線中") ? "bg-amber-400 animate-ping" : "bg-slate-500"}`} />
+                  {mqttStatusText}
+                </span>
+                {mqttConnected && (
+                  <span className="text-[10px] text-emerald-400/80 font-mono bg-emerald-950/40 border border-emerald-900/30 px-1.5 py-0.5 rounded">
+                    🔒 SSL/TLS 通道加密已啟用
+                  </span>
+                )}
+              </div>
+              <div className="flex gap-2">
+                {!mqttConnected ? (
+                  <button 
+                    onClick={connectMqttBroker}
+                    className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-1 px-3 rounded-lg text-[11px] transition duration-150 flex items-center gap-1 active:scale-95 shadow border border-purple-500/20"
+                  >
+                    <i className="fa-solid fa-plug text-[9px]"></i>
+                    連線 Broker
+                  </button>
+                ) : (
+                  <button 
+                    onClick={disconnectMqttBroker}
+                    className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-1 px-3 rounded-lg text-[11px] transition duration-150 flex items-center gap-1 active:scale-95 border border-slate-700"
+                  >
+                    <i className="fa-solid fa-plug-circle-xmark text-[9px]"></i>
+                    中斷連線
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 flex-1 overflow-y-auto grid grid-cols-1 md:grid-cols-12 gap-6 min-h-0 text-xs">
+              
+              {/* Left Column: Config & Input */}
+              <div className="md:col-span-6 space-y-4 flex flex-col justify-between">
+                <div className="space-y-3.5">
+                  {/* Broker config */}
+                  <div className="bg-slate-950/40 border border-slate-800/80 p-4 rounded-2xl space-y-3">
+                    <span className="text-xs font-black text-pink-400 block mb-1">
+                      <i className="fa-solid fa-server mr-1"></i> MQTT TLS 代理伺服器設定
+                    </span>
+                    
+                    <div className="grid grid-cols-1 gap-2.5">
+                      <div>
+                        <label className="block text-slate-400 mb-1 font-bold">加密 Broker 位址 (需 wss 協定以確保 TLS 安全防護)</label>
+                        <input 
+                          type="text" 
+                          value={mqttBrokerUrl} 
+                          onChange={(e) => setMqttBrokerUrl(e.target.value)}
+                          placeholder="例如: wss://broker.emqx.io:8084/mqtt"
+                          className="w-full p-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500 text-[11px]"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-slate-400 mb-1 font-bold">同步主題 (Topic)</label>
+                          <input 
+                            type="text" 
+                            value={mqttTopic} 
+                            onChange={(e) => setMqttTopic(e.target.value)}
+                            className="w-full p-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500 text-[11px]"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-slate-400 mb-1 font-bold">啟用 Retain 保留訊息</label>
+                          <div className="flex items-center h-9">
+                            <label className="flex items-center gap-1.5 cursor-pointer text-slate-300">
+                              <input 
+                                type="checkbox" 
+                                checked={mqttRetain}
+                                onChange={(e) => setMqttRetain(e.target.checked)}
+                                className="w-4 h-4 rounded border-slate-800 bg-slate-950 text-pink-500 focus:ring-pink-500/50 cursor-pointer"
+                              />
+                              <span>作為永久數據庫</span>
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-slate-400 mb-1 font-bold">連線帳號 (選填)</label>
+                          <input 
+                            type="text" 
+                            value={mqttUsername} 
+                            onChange={(e) => setMqttUsername(e.target.value)}
+                            placeholder="Username"
+                            className="w-full p-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500 text-[11px]"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-slate-400 mb-1 font-bold">連線密碼 (選填)</label>
+                          <input 
+                            type="password" 
+                            value={mqttPassword} 
+                            onChange={(e) => setMqttPassword(e.target.value)}
+                            placeholder="Password"
+                            className="w-full p-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500 text-[11px]"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Manual Paste Area */}
+                  <div className="bg-slate-950/40 border border-slate-800/80 p-4 rounded-2xl space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-black text-pink-400 block">
+                        <i className="fa-solid fa-file-invoice mr-1"></i> 或是直接貼上 Spreadsheet / Excel 欄位
+                      </span>
+                      {mqttPasteText && (
+                        <span className="text-[10px] bg-pink-500/20 border border-pink-500/30 text-pink-300 font-black px-1.5 py-0.5 rounded">
+                          已偵測 {parsePastedSpreadsheet(mqttPasteText).length} 點
+                        </span>
+                      )}
+                    </div>
+                    
+                    <textarea 
+                      value={mqttPasteText}
+                      onChange={(e) => setMqttPasteText(e.target.value)}
+                      placeholder="支援直接從 Excel / Google Sheets 複製整欄並貼在這邊：&#10;名稱 [Tab/逗號] 緯度 [Tab/逗號] 經度 [換行]&#10;例如：&#10;廟口奠濟宮, 25.12932, 121.74313&#10;基隆火車站, 25.13125, 121.73891"
+                      className="w-full h-24 p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-300 font-mono text-[10px] focus:outline-none focus:ring-1 focus:ring-purple-500 resize-none leading-relaxed"
+                    />
+                    
+                    <button
+                      onClick={() => {
+                        const parsed = parsePastedSpreadsheet(mqttPasteText);
+                        if (parsed.length === 0) {
+                          showToast("⚠️ 貼上的文字無法解析出有效的點位！");
+                          playErrorBuzz();
+                          return;
+                        }
+                        if (!mqttConnected) {
+                          showToast("⚠️ 請先連線 MQTT 伺服器！");
+                          playErrorBuzz();
+                          return;
+                        }
+                        addMqttLog(`正在從剪貼簿試算表發布 ${parsed.length} 筆點位...`);
+                        const payload = JSON.stringify(parsed, null, 2);
+                        mqttClientRef.current.publish(mqttTopic, payload, { retain: mqttRetain, qos: 1 }, (err: any) => {
+                          if (err) {
+                            addMqttLog(`❌ 試算表發布失敗：${err.message}`);
+                            showToast("❌ 試算表發布失敗");
+                            playErrorBuzz();
+                          } else {
+                            addMqttLog(`✅ 成功將 ${parsed.length} 筆剪貼簿點位發布為 MQTT 數據庫快照！`);
+                            showToast(`🚀 已同步剪貼簿 ${parsed.length} 筆點位！`);
+                            playSynthChime();
+                          }
+                        });
+                      }}
+                      disabled={!mqttPasteText}
+                      className="w-full bg-pink-600 hover:bg-pink-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-extrabold py-2 px-4 rounded-xl text-xs transition duration-150 active:scale-95 flex items-center justify-center gap-1.5 shadow"
+                    >
+                      <i className="fa-solid fa-cloud-arrow-up"></i>
+                      <span>發布貼上的試算表數據 ({parsePastedSpreadsheet(mqttPasteText).length} 點)</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Local Sync Commands */}
+                <div className="pt-4 border-t border-slate-800/60 grid grid-cols-2 gap-3 mt-4">
+                  <button
+                    onClick={() => publishToMqtt("checked")}
+                    disabled={!mqttConnected || checkedCount === 0}
+                    className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-extrabold py-2.5 px-3 rounded-2xl transition duration-150 active:scale-95 flex flex-col items-center gap-0.5 shadow-md"
+                  >
+                    <span className="text-sm"><i className="fa-solid fa-list-check"></i></span>
+                    <span className="text-[11px]">同步選取點位 ({checkedCount} 點)</span>
+                  </button>
+                  <button
+                    onClick={() => publishToMqtt("all")}
+                    disabled={!mqttConnected || landmarks.length === 0}
+                    className="bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-extrabold py-2.5 px-3 rounded-2xl transition duration-150 active:scale-95 flex flex-col items-center gap-0.5 shadow-lg shadow-pink-500/10"
+                  >
+                    <span className="text-sm"><i className="fa-solid fa-database"></i></span>
+                    <span className="text-[11px]">同步目前全庫 ({landmarks.length} 點)</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Right Column: Telemetry & Live Sync */}
+              <div className="md:col-span-6 flex flex-col gap-4">
+                {/* Sleek Terminal Logs */}
+                <div className="flex-1 flex flex-col bg-slate-950 rounded-2xl border border-slate-800 p-4">
+                  <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-900 text-slate-500 text-[10px] font-bold">
+                    <span><i className="fa-solid fa-terminal mr-1"></i> SECURE TLS TELEMETRY LOGS</span>
+                    <button 
+                      onClick={() => setMqttLogs([])}
+                      className="hover:text-slate-300 text-[9px] uppercase tracking-wider"
+                    >
+                      [清除記錄]
+                    </button>
+                  </div>
+                  <div className="flex-1 overflow-y-auto font-mono text-[10px] text-emerald-400 space-y-1.5 min-h-[140px] max-h-[180px] flex flex-col-reverse">
+                    {mqttLogs.length > 0 ? (
+                      mqttLogs.map((log, idx) => (
+                        <div key={idx} className="whitespace-pre-wrap leading-relaxed">
+                          {log}
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-slate-600 italic">等待 TLS 連線中...</div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Subscribed Active Database Sync View */}
+                <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4 flex flex-col gap-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-black text-xs text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-teal-400">
+                      <i className="fa-solid fa-satellite-dish mr-1"></i> 已訂閱的 MQTT 安全數據庫內容
+                    </span>
+                    {mqttParsedPoints.length > 0 && (
+                      <span className="bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-[10px] font-black px-1.5 py-0.5 rounded">
+                        接收成功 ({mqttParsedPoints.length} 點)
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="bg-slate-950 border border-slate-900 rounded-xl p-3 h-32 overflow-y-auto">
+                    {mqttParsedPoints.length > 0 ? (
+                      <div className="space-y-1.5 text-[11px]">
+                        {mqttParsedPoints.slice(0, 15).map((p, idx) => (
+                          <div key={idx} className="flex justify-between text-slate-300 border-b border-slate-900/60 pb-1">
+                            <span className="font-bold">#{p.id} {p.name}</span>
+                            <span className="font-mono text-slate-500 text-[10px]">📍 {p.lat.toFixed(5)}, {p.lng.toFixed(5)}</span>
+                          </div>
+                        ))}
+                        {mqttParsedPoints.length > 15 && (
+                          <div className="text-[10px] text-slate-500 italic text-center pt-1">
+                            還有其餘 {mqttParsedPoints.length - 15} 筆點位...
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="h-full flex flex-col items-center justify-center text-slate-600 italic gap-1">
+                        <i className="fa-solid fa-database text-lg text-slate-800"></i>
+                        <span>等待主題 [{mqttTopic}] 接收更新...</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={applyMqttDatabase}
+                    disabled={mqttParsedPoints.length === 0}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 font-black py-2 px-4 rounded-xl text-xs transition duration-150 active:scale-95 flex items-center justify-center gap-1.5 shadow shadow-emerald-600/10"
+                  >
+                    <i className="fa-solid fa-square-check"></i>
+                    <span>套用此 MQTT 數據庫到我的大花雷達地圖</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-6 border-t border-slate-800 flex justify-end">
+              <button 
+                onClick={() => {
+                  disconnectMqttBroker();
+                  setShowMqttModal(false);
+                }} 
+                className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold px-5 py-2.5 rounded-xl text-xs transition duration-150 active:scale-95"
+              >
+                關閉並中斷 MQTT 連線
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Cloud Settings Slider Modal */}
       {showConfigModal && (
